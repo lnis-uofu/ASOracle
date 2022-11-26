@@ -73,84 +73,85 @@
 (define eia-e12-spread (spread eia-e12 10))
 
 (define (closer n a b)
-  (< (abs (- a number)) (abs (- b number))))
+  (< (abs (- a n)) (abs (- b n))))
 
 ;; Pick the closest resistor feedback pair to the given gain
 (define (divider-closest eia number)
-  (let
-      [order (floor (log number 10))]
-      [normal (/ number (exp 10 order))]
-      [closest (sort eia (lambda (a b) (closer normal (first a) (first b))))])
-  (cons order (first closest)))
+  (let*
+      ([order (floor (log number 10))]
+       [normal (/ number (exp 10 order))]
+       [closest (sort eia (lambda (a b) (closer normal (first a) (first b))))])
+      (cons order (first closest))))
 
 ;; Pick the closest standard resistor to the given resistance
 (define (resistor-closest eia number)
-  (let
-      [order (floor (log number 10))]
+  (let*
+      ([order (floor (log number 10))]
       [normal (/ number (exp 10 order))]
       [closest (sort eia (curry closer normal))])
-  (list (first closest) order))
+      (list (first closest) order)))
 
 ;; Calculate the closest standard resistor summing amplifier input
 ;; resistor given the feedback resistor and the target gain.
 (define (feedback-closest eia feedback gain)
-  let (
-       [order (floor (log number 10))]
-       [normal (/ number (exp 10 order))]
+  (let*
+       ([order (floor (log gain 10))]
+       [normal (/ gain (exp 10 order))]
        [approx (lambda (x) (abs (- gain (/ feedback x))))]
        [target (lambda (a b) (< (approx a) (approx b)))]
        [closest (sort eia target)])
-  (first closest))
+       (first closest)))
 
 (define (synthesize eia expr)
-  (let
-      [eia-spread (spread eia)]
+  (letrec
+      ([eia-spread (spread eia)]
       [synth (lambda (expr)
                (match expr
                  ;; integral also can sum
                  ;; [(integrate initial start end (sum expr) delta) #f]
                  [(integrate initial start end child-expr delta) (integrator (resistor 1 10 5) (capacitor 1 -10 20) (synth child-expr))]
                  [(sum exprs) (inverting (resistor 1 3 1) (resistor 1 3 1)
-                                         (inverting (resistor 1 'k 1) (map (lambda (x) (list (resistor 1 3 1) (synth x))  exprs)))]
+                                         (inverting (resistor 1 'k 1) (map (lambda (x) (list (resistor 1 3 1) (synth x))  exprs))))]
                  [(negative child-expr) (inverting (resistor 1 3 1) (resistor 1 3 1) (synth child-expr))]
-                 [(assign net child-expr) (net-driver net (synth child-expr))]
-                 [(multiply
+                 [(assign net child-expr) (net-port net (synth child-expr))]
+                 [(multiply scalar child-expr) (inverting (resistor 1 3 1) (resistor 1 3 1) (feedback-closest scalar) (synth child-expr))]
                  [(input net) (input-port net)]
                  [(output net) (output-port net)]
                  [symbol? (net-port (synth expr))]
-                 [(constant scalar)? (divider (divider-approx eia-spread vdd vss value))]))]))]
-  (synth expr)
-))
+                 [(constant scalar) (divider (divider-closest eia-spread vdd vss scalar))]
+                 ))])
+  (synth expr))
+)
 
 ;; Flatten all nested structures to nets.
 ;; Define top level module with inputs and outptus.
 ;; Define all wires
 ;; Generate all modules.
-(define flatten-network (network)
-  (match
-      [(integrator (capacitor resistor input-net))
-       (let [child (flatten-network input-net)]
-         [child-net (first (first child))]
-         [net (net-port (gensym "integrator_"))]
-         [instance (integrator capacitor resistor inner-net)])
-       (cons (list net instance) child)]
-    [(inverting (feedback inputs))
-      (let [child (flatten-network input-net)]
-         [child-net (first (first child))]
-         [net (net-port (gensym "integrator_"))]
-         [instance (integrator capacitor resistor inner-net)])
-       (cons (list net instance) child)]
-;; Non-inverting amplifier, gain is 1 + rf/r1
-[(non-inverting (feedback resistor input-net))
-;; Preference would probably be inverting amplifier rather than a
-;; passive divider, but is an option, especially for reference voltages.
-[(divider (top top_res bottom bottom_res))
-[(net-port (symbol))
-[(input-port (output-net))
-[(output-port (input-net))
-[(resistor (value order precision))
-[(capacitor (value order precision))
-)
+;; (define flatten-network (network)
+;;   (match
+;;       [(integrator (capacitor resistor input-net))
+;;        (let [child (flatten-network input-net)]
+;;          [child-net (first (first child))]
+;;          [net (net-port (gensym "integrator_"))]
+;;          [instance (integrator capacitor resistor inner-net)])
+;;        (cons (list net instance) child)]
+;;     [(inverting (feedback inputs))
+;;       (let [child (flatten-network input-net)]
+;;          [child-net (first (first child))]
+;;          [net (net-port (gensym "integrator_"))]
+;;          [instance (integrator capacitor resistor inner-net)])
+;;        (cons (list net instance) child)]
+;; ;; Non-inverting amplifier, gain is 1 + rf/r1
+;; [(non-inverting (feedback resistor input-net))
+;; ;; Preference would probably be inverting amplifier rather than a
+;; ;; passive divider, but is an option, especially for reference voltages.
+;; [(divider (top top_res bottom bottom_res))
+;; [(net-port (symbol))
+;; [(input-port (output-net))
+;; [(output-port (input-net))
+;; [(resistor (value order precision))
+;; [(capacitor (value order precision))
+;; )
 
 (define (literal-read in)
   (syntax->datum
