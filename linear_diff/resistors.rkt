@@ -7,7 +7,7 @@
 (define (flatmap proc seq)
   (foldr append '() (map proc seq)))
 
-(define/memoize partial (spread sequence precision)
+(define/memoize (spread sequence precision)
   (list->vector
    (sort (flatmap (lambda (n)
                     (map (lambda (m) (list (/ m n) m n precision)) sequence))
@@ -43,7 +43,8 @@
 ;; Pick the closest resistor feedback pair to the given gain
 (define (divider-closest eia number)
   (let*
-      ([order (floor (log number 10))]
+      ([eia (spread eia)]
+       [order (floor (log number 10))]
        [normal (/ number (exp 10 order))]
        [closest (sort eia (lambda (a b) (closer normal (first a) (first b))))])
       (cons order (first closest))))

@@ -8,8 +8,9 @@
 
 (provide tokenize)
 
-(define (tokenize ip)
+(define (tokenize path ip)
   (port-count-lines! ip)
+  (lexer-file-path path)
   (define my-lexer
     (lexer-src-pos
      ["\n"
@@ -26,7 +27,7 @@
       (brag-token 'EIA lexeme)]
      [","
       (brag-token lexeme lexeme)]
-     [(char-set "*+-()=")
+     [(char-set "*+-/()=")
       (brag-token lexeme lexeme)]
      [(:or "vdd" "vss" "gnd" "design" "input" "output" "integrate" )
       (brag-token lexeme lexeme)]
