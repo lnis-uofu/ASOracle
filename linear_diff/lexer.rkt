@@ -24,15 +24,15 @@
      [whitespace
       (brag-token 'WHITESPACE lexeme #:skip? #t)]
      [(:: "eia-" (:or "96" "48" "24" "12"))
-      (brag-token 'EIA lexeme)]
+      (brag-token 'EIA (string->symbol lexeme))]
      [","
       (brag-token lexeme lexeme)]
      [(char-set "*+-/()=")
-      (brag-token lexeme lexeme)]
+      (brag-token lexeme (string->symbol lexeme))]
      [(:or "vdd" "vss" "gnd" "design" "input" "output" "integrate" )
       (brag-token lexeme lexeme)]
      [(:: (:+ alphabetic) (:? (:: "_" (:+ alphabetic))))
-      (brag-token 'IDENTIFIER lexeme)]
+      (brag-token 'IDENTIFIER (string->symbol lexeme))]
      [(eof) 'eof]))
   (define (next-token)
     (let ([n (my-lexer ip)])

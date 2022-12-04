@@ -7,7 +7,7 @@
 
 ;;;; DSL AST post expansion
 ;; operator expressions
-(struct ld-program (vdd vss gnd design eia inputs outputs assigns))
+(struct ld-program (vdd vss gnd design eia inputs outputs assigns) #:mutable)
 (struct integrate (expr))
 (struct add (left right))
 (struct subtract (left right))
@@ -15,18 +15,21 @@
 (struct multiply (left right))
 (struct divide (left right))
 (struct constant (scalar))
-(struct variable (name))
+(struct id (name))
 
 (define (eia-lookup name) (list 1 2 3))
+(define (system lines) 'todo)
 
 (define-syntax-rule (eia name)
-  (define eia-series (eia-lookup name)))
+  (define (eia-series system)
+    (system-set-eia (eia-lookup name))))
+
 
 (define-syntax (design stx)
   (syntax-case stx ()
     [(design name)
       (with-syntax
-        ([ident (format-id #'name "design-name")])
+        ([ident (format-id #'name "design-~a" #'name)])
         #'(define ident name))]))
 
 (define-syntax (vdd stx)
@@ -50,8 +53,12 @@
       [(gnd _ n) #'(define name (- n))]
       [(gnd n) #'(define name n)])))
 
-(define-syntax-rule (assign name expr)
-  (hash-set! assign-hash (string->symbol name) expr))
+(define-syntax (assign stx)
+  (syntax-case stx ()
+    [(_ name expr)
+     (with-syntax
+       ([ident (format-id #'name "assign-~a" #'name)])
+       #'(define ident expr))]))
 
 (define-syntax negation
   (syntax-rules (constant)
@@ -100,11 +107,21 @@
     [(_ x ...)
      #'(add x ...)]))
 
-(define-syntax-rule (input name)
-  (append-input (string->symbol name)))
+(define-syntax-rule (variable name) (id 'name))
 
-(define-syntax-rule (output name)
-  (append-output (string->symbol name)))
+(define-syntax (input stx)
+  (syntax-case stx ()
+    [(_ name)
+      (with-syntax
+        ([ident (format-id #'name "input-~a" #'name)])
+        #'(define ident 'name))]))
+
+(define-syntax (output stx)
+  (syntax-case stx ()
+    [(_ name)
+      (with-syntax
+        ([ident (format-id #'name "output-~a" #'name)])
+        #'(define ident 'name))]))
 
 (define-for-syntax (line-order a)
   (syntax-case a ()
@@ -122,23 +139,13 @@
 
 (define-syntax (dsl-expand stx)
   (syntax-case stx ()
-    [(dsl-expand (linear line ...))
-     (let ([sorted (syntax (sort (syntax->list line ...) line-cmp))])
-       (with-syntax ([(lines ...) sorted])
-         #'(#%module-begin
-            (define input-list empty)
-            (define (append-input item) (set! input-list (cons item input-list)))
-            (define output-list empty)
-            (define (append-output item) (set! output-list (cons item output-list)))
-            (define assign-hash (make-hash))
-            lines ...
-            (define ld-system (ld-program
-                               power-vdd power-vss power-gnd
-                               design-name eia-series
-                               (vector->list input-list)
-                               (vector->list output-list)
-                               (make-immutable-hash (hash->list assign-hash))))
-            (provide ld-system))))]))
+    [(dsl-expand (linear (line lines) ...))
+     (with-syntax ([((id _ ...) ...) #'(lines ...)])
+;;                   [((id ...) ...) #'contents])
+       #'(#%module-begin
+          lines ...
+          (define ld-system (id ...))
+          (provide ld-system)))]))
 
 (provide (rename-out [dsl-expand #%module-begin]) #%datum #%app #%top)
 

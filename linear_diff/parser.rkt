@@ -1,5 +1,6 @@
 #lang brag
-linear : (design | eia | vdd | vss | gnd | input | output | assign)+
+linear : line+
+line : design | eia | vdd | vss | gnd | input | output | assign
 design : /"design" IDENTIFIER
 eia : EIA
 vdd : /"vdd" /"=" "-"? NUMBER
@@ -9,7 +10,7 @@ input : /"input" IDENTIFIER (/"," IDENTIFIER)*
 output : /"output" IDENTIFIER (/"," IDENTIFIER)*
 assign : IDENTIFIER /"=" expression
 
-/expression : integration | parenthesis | negation | multiplication | addition | subtraction | variable | constant
+@expression : integration | parenthesis | negation | multiplication | addition | subtraction | variable | constant
 
 variable : IDENTIFIER
 constant : NUMBER
