@@ -1,12 +1,12 @@
 #lang racket
 (require (for-syntax syntax/parse))
 (require (for-syntax racket/syntax))
+(require "resistor.rkt")
 
 (provide ld-program vss gnd vdd negation integration multiplication addition subtraction eia input output design assign)
 (provide dsl-expand negative add subtract multiply integrate constant variable)
 
-;;;; DSL AST post expansion
-;; operator expressions
+;;;;;;;; DSL AST post expansion ;;;;;;;;
 (struct ld-program (vdd vss gnd design eia inputs outputs assigns) #:mutable)
 (struct integrate (expr))
 (struct add (left right))
@@ -15,51 +15,97 @@
 (struct multiply (left right))
 (struct divide (left right))
 (struct constant (scalar))
-(struct id (name))
+(struct reference (name))
 
-(define (eia-lookup name) (list 1 2 3))
-(define (system lines) 'todo)
+(define (setup-system lines)
+  (define system (ld-program))
+  (for ([line lines]) (apply line system)))
 
-(define-syntax-rule (eia name)
-  (define (eia-series system)
-    (system-set-eia (eia-lookup name))))
+;;;;;;;; Line expansion ;;;;;;;;
+(define-for-syntax (line-identifier line)
+  (syntax-case line ()
+    ([(eia series) (format-id #'line "eia")]
+     [(input id) (format-id #'line "input-~a" #'id)]
+     [(output id) (format-id #'line "output-~a" #'id)]
+     [(design _) (format-id #'line "design")]
+     [(vdd _) (format-id #'line "power-vdd")]
+     [(vss _) (format-id #'line "power-vss")]
+     [(gnd _) (format-id #'line "power-gnd")]
+     [(assign id _) (format-id #'line "assign-~a" #'id)])))
 
+(define-syntax (eia stx)
+  (with-syntax
+    ([ident (line-identifier #'stx)])
+    (syntax-case stx ()
+      [(eia series)
+       #'(define (ident system)
+           (set!-ld-program-eia system series))])))
 
 (define-syntax (design stx)
-  (syntax-case stx ()
-    [(design name)
-      (with-syntax
-        ([ident (format-id #'name "design-~a" #'name)])
-        #'(define ident name))]))
+  (with-syntax
+    ([ident (line-identifier #'stx)])
+    (syntax-case stx ()
+      [(design name)
+        #'(define (ident system)
+            (set!-ld-program-design system 'name))])))
 
 (define-syntax (vdd stx)
   (with-syntax
-    ([name (format-id stx "power-vdd")])
+    ([ident (line-identifier #'stx)])
     (syntax-case stx ()
-      [(vdd _ n) #'(define name (- n))]
-      [(vdd n) #'(define name n)])))
+      [(vdd _ n)
+       #'(vdd (- n))]
+      [(vdd n)
+       #'(define (ident system)
+           (set!-ld-program-vdd system n))])))
 
 (define-syntax (vss stx)
   (with-syntax
-    ([name (format-id stx "power-vss")])
+    ([ident (line-identifier #'stx)])
     (syntax-case stx ()
-      [(vss _ n) #'(define name (- n))]
-      [(vss n) #'(define name n)])))
+      [(vss _ n)
+       #'(vss (- n))]
+      [(vss n)
+       #'(define (ident system)
+           (set!-ld-program-vss system n))])))
 
 (define-syntax (gnd stx)
   (with-syntax
-    ([name (format-id stx "power-gnd")])
+    ([ident (line-identifier #'stx)])
     (syntax-case stx ()
-      [(gnd _ n) #'(define name (- n))]
-      [(gnd n) #'(define name n)])))
+      [(gnd _ n)
+       #'(gnd (- n))]
+      [(gnd n)
+       #'(define (ident system)
+           (set!-ld-program-gnd system n))]))))
 
 (define-syntax (assign stx)
-  (syntax-case stx ()
-    [(_ name expr)
-     (with-syntax
-       ([ident (format-id #'name "assign-~a" #'name)])
-       #'(define ident expr))]))
+  (with-syntax
+    ([ident (line-identifier stx)])
+    (syntax-case stx ()
+      [(_ name expr)
+       #'(define (ident system)
+           (hash-set! (get-system-assign system) 'name expr)))]))
 
+(define-syntax (input stx)
+  (syntax-case stx ()
+    [(_ name)
+      (with-syntax
+        ([ident (format-id #'name "input-~a" #'name)])
+        #'(define (ident system)
+            (set!-ld-program-inputs system
+             (cons 'name (ld-program-inputs system)))))]))
+
+(define-syntax (output stx)
+  (syntax-case stx ()
+    [(_ name)
+      (with-syntax
+        ([ident (format-id #'name "output-~a" #'name)])
+        #'(define (ident system)
+            (set!-ld-program-outputs system
+             (cons 'name (ld-program-outputs system)))))]))
+
+;;;;;;;; Expressions ;;;;;;;;
 (define-syntax negation
   (syntax-rules (constant)
     [(_ (constant c))
@@ -107,47 +153,22 @@
     [(_ x ...)
      #'(add x ...)]))
 
-(define-syntax-rule (variable name) (id 'name))
+(define-syntax-rule (variable name)
+  (reference 'name))
 
-(define-syntax (input stx)
-  (syntax-case stx ()
-    [(_ name)
-      (with-syntax
-        ([ident (format-id #'name "input-~a" #'name)])
-        #'(define ident 'name))]))
-
-(define-syntax (output stx)
-  (syntax-case stx ()
-    [(_ name)
-      (with-syntax
-        ([ident (format-id #'name "output-~a" #'name)])
-        #'(define ident 'name))]))
-
-(define-for-syntax (line-order a)
-  (syntax-case a ()
-    [(design _) 0]
-    [(eia _) 1]
-    [(vdd _) 2]
-    [(vss _) 3]
-    [(gnd _) 4]
-    [(input _) 5]
-    [(output _) 6]
-    [(assign _) 7]))
-
-(define-for-syntax (line-cmp a b)
-  (< (line-order a) (line-order b)))
-
+;;;;;;;; Language expansion ;;;;;;;;
 (define-syntax (dsl-expand stx)
   (syntax-case stx ()
-    [(dsl-expand (linear (line lines) ...))
-     (with-syntax ([((id _ ...) ...) #'(lines ...)])
-;;                   [((id ...) ...) #'contents])
+    [(dsl-expand (linear (line content) ...))
+     (with-syntax ([(id ...) (syntax/map generate-id #'(content ...))])
        #'(#%module-begin
-          lines ...
-          (define ld-system (id ...))
+          content ...
+          (define ld-system (setup-system id ...))
           (provide ld-system)))]))
 
 (provide (rename-out [dsl-expand #%module-begin]) #%datum #%app #%top)
+
+;;;;;;;; Tests ;;;;;;;;
 
 (require rackunit rackunit/text-ui syntax/macro-testing)
 (define constant-tests
