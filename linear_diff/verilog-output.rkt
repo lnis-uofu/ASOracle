@@ -1,6 +1,86 @@
-(require "expander.rkt")
+#lang racket
+(require "synthesis.rkt")
+(require racket/format)
+(provide write-verilog)
 
-;; Optimizations:
-;; all summations or integration should be wrapped in either negation or double negation.
-;; push negations up from children to summation.
-;; if more children are negation, negate the summation and distribute negation. otherwise double negate.
+(define (eia-name eia) "foo")
+(define (format-resistor resistor)
+  (~d (* (resistor-value resistor) (resistor-scale resistor))))
+
+(define (write-integrator port assign id)
+  (match ([(integrator capacitor output inputs)
+        (write port "integrator_~a integrator_~a\n" (size inputs) id)
+        (write port "#(.CAPACITOR(~a),\n," (format-capacitor capacitor))
+        (for ([(resistor _) inputs] [i (in-naturals)]) (write port ".RESISTOR_~a(~a),\n" i (format-resistor resistor)))
+        (write port ")\n(")
+        (write port ".OUTPUT(~a),\n" output)
+        (for ([(_ net) inputs] [i (in-naturals)]) (write port ".INPUT_~a(~a),\n" i net))
+        (write port ");")])))
+
+(define (write-inverting port assign id)
+  (match ([(inverting feedback output inputs)
+           (write port "inverting_~a inverting_~a\n" (size inputs) id)
+           (write port "#(.FEEDBACK(~a)\n," (format-resistor feedback))
+           (for ([(resistor _) inputs] [i (in-naturals)]) (write port ".RESISTOR_~a(~a),\n" i (format-resistor resistor)))
+           (write port ")\n(")
+           (write port ".OUTPUT(~a),\n" output)
+           (for ([(_ net) inputs] [i (in-naturals)]) (write port ".INPUT_~a(~a),\n" i net))
+           (write port ");")])))
+
+(define (write-noninverting port assign id)
+  (match ([(noninverting feedback output inputs)
+        (write port "noninverting_~a noninverting_~a\n" (size inputs) id)
+        (write port "#(.FEEDBACK(~a)\n," (format-resistor feedback))
+        (for ([(resistor _) inputs] [i (in-naturals)]) (write port ".RESISTOR_~a(~a),\n" i (format-resistor resistor)))
+        (write port ")\n(")
+        (write port ".OUTPUT(~a),\n" output)
+        (for ([(_ net) inputs] [i (in-naturals)]) (write port ".INPUT_~a(~a),\n" i net))
+        (write port ");")])))
+
+(define (write-divider port assign id)
+  (match ([(divider output top bottom)
+           (write port "divider divider_~a\n" id)
+           (write port "#(")
+           (write port (match ([(resistor _) top])
+                         (format port ".TOP(~a)\n," (format-resistor feedback))))
+           (write port (match ([(resistor _) bottom])
+                         (format ".BOTTOM(~a)\n," (format-resistor feedback))))
+           (write port ")\n(")
+           (write port ".OUTPUT(~a),\n" output)
+           (write port (match ([(_ source) top])
+                         (format ".TOP_IN(~a)\n," source)))
+           (write port (match ([(_ source) bottom])
+                         (format ".BOTTOM_IN(~a)" source)))
+           (write port ");")])))
+
+;; Would be nice to be polymorphic instead
+(define (write-module port assign id)
+  (let ([serializer (match
+                        ([(integrator _ ...) write-integrator]
+                         [(inverting _ ...) write-inverting]
+                         [(noninverting _ ...) write-noninverting]
+                         [(divider _ ...) write-divider]))])
+    (serializer port assign id)))
+
+(define (write-wires port inputs outputs assigns)
+  (for ([assign assigns])
+    (let ([net (output-net assign)])
+      (if (and (not (member assign inputs)) (not (member assign outputs)))
+          (write port "wire ~a;" assign)))))
+
+(define (write-verilog mapped port)
+  (match
+      ([(ld-program vdd vss name eia inputs outputs assigns)
+        (let ([out (open-output-file filename)])
+          (write port "module ~a (\n" name)
+          (write port "input vdd, vss, gnd,")
+          (for ([input inputs]) (write port "input ~a,\n" input))
+          (for ([output outputs]) (write port "output ~a,\n" output))
+          (write port ");\n\n")
+          (write port "parameter VDD = ~a;\n" vdd)
+          (write port "parameter VSS = ~a;\n" vss)
+          (write port "parameter GND = ~a;\n" gnd)
+          (write port "parameter EIA = ~a;\n\n" (eia-name eia))
+          (write-wires port inputs outputs assigns)
+          (for ([assign assigns] [i (in-naturals)]) (write-module port assign i))
+          (write port "endmodule;"))])))

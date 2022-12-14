@@ -1,19 +1,20 @@
 #lang linear_diff
 # Setup
-design test
 eia-96
+design thing
 vdd = 9
-vss = -9.0
+vss = -9
 gnd = 0
 
-input a, b
-input c
-output x
-output z, y
+# IO
+input y
+input x
+output w
+output z
 
-
-x = 5
-y = x + 2
-
-d = integrate(-34*a + x*4)
-z = 4*d
+# Expressions
+a = 1
+b = a + y
+c = 1 + 2 * 5
+z = integrate(-4.5 * x + 2)
+w = (1.2 * 4 / 5) y + - z + c
