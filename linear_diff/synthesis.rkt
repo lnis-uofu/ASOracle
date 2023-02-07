@@ -1,6 +1,14 @@
 #lang racket
 (require "expander.rkt" "resistors.rkt")
-(provide synthesize)
+
+(provide synthesizer
+         synthesize-expr
+         (struct-out integrator)
+         (struct-out inverting)
+         (struct-out non-inverting)
+         (struct-out divider)
+         (struct-out resistor)
+         (struct-out capacitor))
 
 ;; (add x (mult y z)) => (add (mult 1 x) (mult y z)) all summations children are multiplication, multiply 1 if not a multiply.
 
@@ -11,17 +19,19 @@
 
 ;;;; Devices
 ;; Vout(t1) = Vout(t0) - 1/RC * (integral 0 to t1 Vin(t)dt)
-(struct integrator (capacitor resistor output-net input-nets))
+(struct integrator (capacitor resistor output-net input-nets) #:transparent)
 ;; Inputs are pairs '(resistor . input-net). Summation is inverting.
-(struct inverting (feedback output-net input-nets))
+(struct inverting (feedback output-net input-nets) #:transparent)
 ;; Non-inverting amplifier, gain is 1 + rf/r1
-(struct non-inverting (feedback output-net input-net))
+(struct non-inverting (feedback output-net input-net) #:transparent)
 ;; Preference would probably be inverting amplifier rather than a
 ;; passive divider, but is an option, especially for reference voltages.
-(struct divider (output-net input-top input-bottom))
+(struct divider (output-net resistor-top input-top resistor-bottom input-bottom) #:transparent)
 ;;(struct net-port (symbol output-net))
-(struct resistor (value order precision))
-(struct capacitor (value order precision))
+(struct resistor (value order precision) #:transparent)
+(struct capacitor (value order precision) #:transparent)
+
+(define (output-net e) 'x)
 
 (define (expand-sum-child synth feedback)
   (lambda (expr)
@@ -32,7 +42,19 @@
        (list (feedback-closest feedback scalar) (synth child))]
       [child
        (list feedback (synth child))])))
-(struct sum (child-exprs))
+(struct sum (child-))
+
+
+
+(define (normalize-sum-child normalize)
+  (lambda (expr)
+    (match expr
+      [(negative (multiply scalar child))
+       (multiply scalar (negative (normalize child)))]
+      [(multiply scalar child)
+       (multiply scalar (normalize child))]
+      [child
+       (multiply (constant 1) (normalize child))])))
 
 (define (collapse-add expr)
   (match expr
@@ -43,7 +65,7 @@
                 [(list (sum j) (sum k )) (sum (append j k))]
                 [(list (sum j) k) (sum (cons k j))]
                 [(list j (sum k)) (sum (cons j k))]
-                [(list j k) (sum j k)]))]
+                [(list j k) (sum '(j k))]))]
     [(integrate y) (integrate (collapse-add y))]
     [(negative y) (negative (collapse-add y))]
     [(multiply x y) (multiply (collapse-add x) (collapse-add y))]
@@ -53,23 +75,23 @@
   (match expr
     ;; integral also can sum
     [(negative (integrate (sum child-exprs)))
-     (negative (integrate (sum (map (compose normalize expand-sum-child) child-exprs))))]
+     (negative (integrate (sum (map (normalize-sum-child normalize ) child-exprs))))]
 
     [(integrate (negative (sum child-exprs)))
-     (negative (integrate (sum (map (compose normalize expand-sum-child) child-exprs))))]
+     (negative (integrate (sum (map (curry normalize-sum-child normalize) child-exprs))))]
 
     [(integrate (sum child-exprs))
      (negative (negative (integrate
-                          (sum (map (compose normalize expand-sum-child) child-exprs)))))]
+                          (sum (map (curry normalize-sum-child normalize) child-exprs)))))]
 
     [(integrate child-expr)
-(negative (negative (integrate (sum (compose normalize expand-sum-child) child-expr))))]
+(negative (negative (integrate (sum (curry normalize-sum-child normalize) child-expr))))]
 
     [(negative (sum child-exprs))
-     (negative (sum (map (compose normalize expand-sum-child) child-exprs)))]
+     (negative (sum (map (curry normalize-sum-child normalize) child-exprs)))]
 
     [(sum child-exprs)
-     (negative (negative (sum (map (compose normalize expand-sum-child) child-exprs))))]
+     (negative (negative (sum (map (curry normalize-sum-child normalize) child-exprs))))]
 
     [(negative (multiply scalar child-expr))
      (negative (multiply scalar (normalize child-expr)))]
@@ -82,10 +104,10 @@
 
     [x x]))
 
-(define (child-for-feedback feedback child)
-  (match child [(multiply scalar input) (list (feedback-closest feedback scalar) input)]))
+(define (child-for-feedback eia feedback child)
+  (match child [(multiply (constant scalar) input) (list (feedback-closest eia feedback scalar) input)]))
 
-(define (synthesize eia power-vdd power-vss expr)
+(define (synthesize-expr eia power-vdd power-vss expr)
   (letrec ([synth (lambda (expr)
     (match expr
       ;; integral also can sum
@@ -94,70 +116,89 @@
                    (resistor 1 10 5)
                    (capacitor 1 -10 20)
                    (map
-                    (compose (curry child-for-feedback (resistor 1 10 5))
-                             (lambda (res child) (list res (synth child))))
+                    (compose
+                     (match-lambda [(list res child) (list res (synth child))])
+                     (curry child-for-feedback eia (resistor 1 10 5)))
                     child-exprs))]
 
       [(negative (sum child-exprs))
        (let* (
               [feedback (resistor 1 'k 1)]
-              [child-transform (compose (curry child-for-feedback feedback)
-                                        (lambda (res child) (list res (synth child))))]
+              [child-transform (compose (match-lambda [(list res child) (list res (synth child))])
+                                        (curry child-for-feedback eia feedback))]
               [children (map child-transform child-exprs)]
               [id (gensym)])
-       (inverting feedback id children))]
+       (inverting id feedback children))]
 
       [(negative child-expr)
-       (inverting (gensym) (resistor 1 3 1) (resistor 1 3 1) (synth child-expr))]
+       (inverting (gensym) (resistor 1 3 1) (synth child-expr))]
 
       [(negative (multiply scalar child-expr))
        (inverting (gensym) (feedback-closest scalar) (synth child-expr))]
 
       [(multiply scalar child-expr)
-       (synth (negative (negative expr)))]
-      [(constant scalar) (divider (gensym) (divider-closest eia power-vdd power-vss scalar))]
+       (negative (synth (negative expr)))]
+      [(constant scalar)
+       (match-let ([(cons order (cons top bottom)) (divider-closest eia power-vdd power-vss scalar)])
+         (divider (gensym)
+                  (resistor top order 10)
+                  power-vdd
+                  (resistor bottom order 10)
+                  power-vss))]
 
       [ref ref]))])
-  (synth (collapse-add expr))))
+    (synth (normalize (collapse-add expr)))))
+
+(define (synthesizer program) (curry synthesize-expr
+                     (ld-program-eia program)
+                     (ld-program-vdd program)
+                     (ld-program-vss program)))
+;; (define (synthesize program)
+;;   (let ([synthesized
+;;          (map
+;;               (ld-program-assigns program))])
+;;     (struct-copy ld-program program [assigns synthesized])))
 
 (define (flatten-network expr)
-  (match expr
-    [(integrator output capacitor output inputs)
-     (match inputs
-       ([(list (list resistor input)...)
-         ;;
-         (let* ([children (for/list ([r resistor] [i input]) (list r (output-net input)))]
-                [neighbors (map flatten-network input)]
-                [flattened (integrator output capacitor resistor children)])
-           (list flattened neighbors))]))]
+  'void
+  ;; (match expr
+  ;;   [(integrator output capacitor output inputs)
+  ;;    (match inputs
+  ;;      [(list (list resistor input)...)
+  ;;        ;;
+  ;;        (let* ([children (for/list ([r resistor] [i input]) (list r (output-net input)))]
+  ;;               [neighbors (map flatten-network input)]
+  ;;               [flattened (integrator output capacitor resistor children)])
+  ;;          (cons flattened neighbors))])]
 
-    [(inverting feedback output inputs)
-     (match inputs
-       ([(list (list resistor input)...)
-         (let* ([children (for/list ([r resistor] [i input]) (list r (output-net input)))]
-                [neighbors (map flatten-network input)]
-                [flattened (inverting output capacitor resistor children)])
-           (list flattened neighbors))]))]
+  ;;   [(inverting feedback output inputs)
+  ;;    (match inputs
+  ;;      [(list (list resistor input)...)
+  ;;        (let* ([children (for/list ([r resistor] [i input]) (list r (output-net input)))]
+  ;;               [neighbors (map flatten-network input)]
+  ;;               [flattened (inverting output capacitor resistor children)])
+  ;;          (cons flattened neighbors))])]
 
-    [(noninverting feedback output inputs)
-     (match inputs ([((resistor input)...)
-                     (let* (
-                           [children (for/list ([r resistor] [i input]) (list r (output-net input)))]
-                           [neighbors (map flatten-network input)]
-                           [flattened (noninverting output capacitor resistor children)])
-                       (cons flattened neighbors))]))]
+  ;;   [(non-inverting feedback output inputs)
+  ;;    (match inputs
+  ;;      [(list (list resistor input)...)
+  ;;        (let* ([children (for/list ([r resistor] [i input]) (list r (output-net input)))]
+  ;;               [neighbors (map flatten-network input)]
+  ;;               [flattened (non-inverting output capacitor resistor children)])
+  ;;          (cons flattened neighbors))])]
 
-    [(divider output top bottom)
-     (match inputs ([((resistor t) ti) top]
-                    [((resistor b) bi) bottom]
-                     (let* (
-                            [top (t (output-net ti))]
-                            [bottom (b (output-net bi))]
-                            [neighbors (append  (flatten-network ti) (flatten-network bi))]
-                            [flattened (integrator output-net capacitor resistor children)])
-                       (cons flattened neighbors))))]
+  ;;   [(divider output top top-net bottom bottom-net)
+  ;;    (match-let ([(list tr ti) top]
+  ;;                [(list br bi) bottom])
+  ;;      (let* (
+  ;;             [top (tr (output-net ti))]
+  ;;             [bottom (br (output-net bi))]
+  ;;             [neighbors (append (flatten-network ti) (flatten-network bi))]
+  ;;             [flattened (divider output-net top bottom)])
+  ;;        (cons flattened neighbors)))]
 
-    [(reference c) '()]))
+  ;;   [_ '()])
+  );; (reference c) '()]))
 
 ;;        (let [child (flatten-network input-net)]
 ;;          [child-net (first (first child))]

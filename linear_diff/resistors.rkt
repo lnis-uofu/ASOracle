@@ -7,12 +7,11 @@
 (define (flatmap proc seq)
   (foldr append '() (map proc seq)))
 
-(define/memoize (spread sequence precision)
-  (list->vector
+(define/memoize (spread sequence)
    (sort (flatmap (lambda (n)
-                    (map (lambda (m) (list (/ m n) m n precision)) sequence))
+                    (map (lambda (m) (list (/ m n) m n)) sequence))
                   sequence)
-         (lambda (a b) (< (first a) (first b))))))
+         (lambda (a b) (< (car a) (car b)))))
 
 ;; EIA E96 1% standard values
 (define eia-96 '(10.0 	10.2 	10.5 	10.7 	11.0 	11.3 	11.5 	11.8 	12.1 	12.4 	12.7 	13.0
@@ -41,11 +40,11 @@
   (< (abs (- a n)) (abs (- b n))))
 
 ;; Pick the closest resistor feedback pair to the given gain
-(define (divider-closest eia number)
+(define (divider-closest eia vdd vss number)
   (let*
       ([eia (spread eia)]
        [order (floor (log number 10))]
-       [normal (/ number (exp 10 order))]
+       [normal (/ number (expt 10 order))]
        [closest (sort eia (lambda (a b) (closer normal (first a) (first b))))])
       (cons order (first closest))))
 
@@ -53,17 +52,17 @@
 (define (resistor-closest eia number)
   (let*
       ([order (floor (log number 10))]
-      [normal (/ number (exp 10 order))]
+      [normal (/ number (expt 10 order))]
       [closest (sort eia (curry closer normal))])
       (list (first closest) order)))
 
 ;; Calculate the closest standard resistor summing amplifier input
 ;; resistor given the feedback resistor and the target gain.
-(define (feedback-closest eia feedback gain)
-  (let*
-       ([order (floor (log gain 10))]
-       [normal (/ gain (exp 10 order))]
-       [approx (lambda (x) (abs (- gain (/ feedback x))))]
-       [target (lambda (a b) (< (approx a) (approx b)))]
-       [closest (sort eia target)])
-       (first closest)))
+(define (feedback-closest eia feedback gain) 42)
+  ;; (let*
+  ;;      ([order (floor (log gain 10))]
+  ;;      [normal (/ gain (expt 10 order))]
+  ;;      [approx (lambda (x) (abs (- gain (/ feedback x))))]
+  ;;      [target (lambda (a b) (< (approx a) (approx b)))]
+  ;;      [closest (sort eia target)])
+  ;;      (first closest)))

@@ -4,20 +4,30 @@
 (require (for-syntax syntax/stx))
 (require "resistors.rkt")
 
-(provide vss gnd vdd negation integration multiplication addition subtraction eia input output design assign eia-96 eia-48 eia-24 eia-12 (struct-out ld-program))
+(provide vss gnd vdd negation integration multiplication
+         addition subtraction eia input output design assign variable
+         eia-96 eia-48 eia-24 eia-12)
 
-(provide dsl-expand negative add subtract multiply integrate constant variable)
+(provide dsl-expand
+         (struct-out ld-program)
+         (struct-out negative)
+         (struct-out add)
+         (struct-out subtract)
+         (struct-out multiply)
+         (struct-out integrate)
+         (struct-out constant)
+         (struct-out reference))
 
 ;;;;;;;; DSL AST post expansion ;;;;;;;;
-(struct ld-program (vdd vss gnd design eia inputs outputs assigns) #:mutable)
-(struct integrate (expr))
-(struct add (left right))
-(struct subtract (left right))
-(struct negative (expr))
-(struct multiply (left right))
-(struct divide (left right))
-(struct constant (scalar))
-(struct reference (name))
+(struct ld-program (vdd vss gnd design eia inputs outputs assigns) #:mutable #:transparent)
+(struct integrate (expr) #:transparent)
+(struct add (left right) #:transparent)
+(struct subtract (left right) #:transparent)
+(struct negative (expr) #:transparent)
+(struct multiply (left right) #:transparent)
+(struct divide (left right) #:transparent)
+(struct constant (scalar) #:transparent)
+(struct reference (name) #:transparent)
 
 (define (setup-system lines)
   (define system (ld-program 0 0 0 "test" eia-96 empty empty (make-hash)))
@@ -98,7 +108,7 @@
     [(_ (constant c))
      (constant (- c))]
     [(_ n ...)
-     #'(negative n ...)]))
+     (negative n ...)]))
 
 (define-syntax (integration stx)
   (syntax-case stx (negation)
@@ -148,62 +158,67 @@
   (syntax-case stx ()
     [(dsl-expand (linear (line content) ...))
      #'(#%module-begin
-          (define ld-system (setup-system (list content ...)))
-          (provide ld-system))]))
+          (define parsed-system (setup-system (list content ...)))
+          (provide parsed-system))]))
 
 (provide (rename-out [dsl-expand #%module-begin]) #%datum #%app #%top #%top-interaction)
 
 ;;;;;;;; Tests ;;;;;;;;
+(module+ test
+  (require rackunit rackunit/text-ui syntax/macro-testing)
+   (define constant-tests
+     (test-suite
+     "Constant expansion"
+     [test-case "Simple addition collapse"
+       (check-equal? (phase1-eval #'(addition (constant 2) (constant 3)))
+                     '(constant (+ 2 3)))]
+     [test-case "Simple addition of negative collapse"
+       (check-equal? (phase1-eval #'(addition (constant 2) (negation (constant 3))))
+                     '(constant (+ 2 (- 3))))]
+     [test-case "Simple addition of negative collapse"
+       (check-equal? (phase1-eval #'(addition (constant 2) (addition (constant 3) (addition (constant 4) (constant 5)))))
+                     '(constant (+ 2 (+ 3 (+ 4 5)))))]
+     [test-case "Simple subtraction collapse"
+       (check-equal? (phase1-eval #'(subtraction (constant 2) (constant 3)))
+                     '(constant (- 2 3)))]
+     [test-case "Simple multiplication collapse"
+       (check-equal? (phase1-eval #'(multiplication (constant 3) (constant 4)))
+                   '(constant (* 3 4)))]
+     [test-case "Nested addition in multiplication right term"
+                   (check-equal? (phase1-eval #'(multiplication (constant 3) (addition (constant 4) (constant 5))))
+                   '(constant (* 3 (+ 4 5))))]
+     [test-case "Nested addition in multiplication left term"
+       (check-equal? (phase1-eval #'(multiplication (addition (constant 4) (constant 5)) (constant 3)))
+                     '(constant (* (+ 4 5) 3)))]
+     [test-case "Nested addition in multiplication both term"
+       (check-equal? (phase1-eval #'(multiplication (addition (constant 4) (constant 5)) (addition (constant 3) (constant 2))))
+                     '(constant (* (+ 4 5) (+ 3 2))))]
+     [test-case "Simple division collapse"
+       (check-equal? (phase1-eval #'(division (constant 3) (constant 4)))
+                     '(constant (/ 3 4)))]
+     [test-case "Nested addition in division right term"
+       (check-equal? (phase1-eval #'(division (constant 3) (addition (constant 4) (constant 5))))
+                     '(constant (/ 3 (+ 4 5))))]
+     [test-case "Nested addition in division left term"
+       (check-equal? (phase1-eval #'(division (addition (constant 4) (constant 5)) (constant 3)))
+            '(constant (/ (+ 4 5) 3)))]
+     [test-case "Nested addition in division both term"
+       (check-equal? (phase1-eval #'(division (addition (constant 4) (constant 5))
+                                              (addition (constant 3) (constant 2))))
+                     '(constant (/ (+ 4 5) (+ 3 2))))]))
 
-(require rackunit rackunit/text-ui syntax/macro-testing)
-(define constant-tests
-  (test-suite
-   "Constant expansion"
-   [check-equal? (phase1-eval #'(addition (constant 2) (constant 3)))
-                 '(constant (+ 2 3))
-                 "Simple addition collapse"]
-   [check-equal? (phase1-eval #'(addition (constant 2) (negation (constant 3))))
-                 '(constant (+ 2 (- 3)))
-                 "Simple addition of negative collapse"]
-   [check-equal? (phase1-eval #'(addition (constant 2) (addition (constant 3) (addition (constant 4) (constant 5)))))
-                 '(constant (+ 2 (+ 3 (+ 4 5))))
-                 "Simple addition of negative collapse"]
-   [check-equal? (phase1-eval #'(subtraction (constant 2) (constant 3)))
-                 '(constant (- 2 3))
-                 "Simple subtraction collapse"]
-   [check-equal? (phase1-eval #'(multiplication (constant 3) (constant 4)))
-                 '(constant (* 3 4))
-                 "Simple multiplication collapse"]
-   [check-equal? (phase1-eval #'(multiplication (constant 3) (addition (constant 4) (constant 5))))
-                 '(constant (* 3 (+ 4 5)))
-                 "Nested addition in multiplication right term"]
-   [check-equal? (phase1-eval #'(multiplication (addition (constant 4) (constant 5)) (constant 3)))
-                 '(constant (* (+ 4 5) 3))
-                 "Nested addition in multiplication left term"]
-   [check-equal? (phase1-eval #'(multiplication (addition (constant 4) (constant 5)) (addition (constant 3) (constant 2))))
-                 '(constant (* (+ 4 5) (+ 3 2)))
-                 "Nested addition in multiplication both term"]
-   [check-equal? (phase1-eval #'(division (constant 3) (constant 4)))
-                 '(constant (/ 3 4))
-                 "Simple division collapse"]
-   [check-equal? (phase1-eval #'(division (constant 3) (addition (constant 4) (constant 5))))
-                 '(constant (/ 3 (+ 4 5)))
-                 "Nested addition in division right term"]
-   [check-equal? (phase1-eval #'(division (addition (constant 4) (constant 5)) (constant 3)))
-                 '(constant (/ (+ 4 5) 3))
-                 "Nested addition in division left term"]
-   [check-equal? (phase1-eval #'(division (addition (constant 4) (constant 5)) (addition (constant 3) (constant 2))))
-                 '(constant (/ (+ 4 5) (+ 3 2)))
-                 "Nested addition in division both term"]))
 
-(test-suite
- "Power negative sign handling"
- [check-equal? (phase1-eval #'(vss "-" 9.0))
-               '(vss -9.0) "VSS substitute"]
- [check-equal? (phase1-eval #'(vdd "-" 9.0))
-               '(vdd -9.0) "VDD substitute"]
- [check-equal? (phase1-eval #'(gnd "-" 9.0))
-               '(gnd -9.0) "GND substitute"])
+  (define power-tests (test-suite
+   "Power negative sign handling"
+   [test-case "VSS substitution"
+     (check-equal? (phase1-eval #'(vss "-" 9.0))
+                   '(vss -9.0))]
+   [test-case "VDD substitute"
+     (check-equal? (phase1-eval #'(vdd "-" 9.0))
+                   '(vdd -9.0))]
+   [test-case "GND substitute"
+     (check-equal? (phase1-eval #'(gnd "-" 9.0))
+                   '(gnd -9.0) )]))
 
-(require rackunit/text-ui)
-;; (run-tests constant-tests)
+  (run-tests constant-tests)
+  (run-tests power-tests))
