@@ -1,5 +1,5 @@
 #lang racket
-(require "expander.rkt" "resistors.rkt")
+(require "resistors.rkt" "dsl.rkt")
 
 (provide synthesizer
          synthesize-expr
@@ -22,16 +22,18 @@
 (struct integrator (capacitor resistor output-net input-nets) #:transparent)
 ;; Inputs are pairs '(resistor . input-net). Summation is inverting.
 (struct inverting (feedback output-net input-nets) #:transparent)
-;; Non-inverting amplifier, gain is 1 + rf/r1
-(struct non-inverting (feedback output-net input-net) #:transparent)
+;; Non-inverting amplifier, gain is 1 + rf/r1, BUT it shifts the phase so not really usable.
+
 ;; Preference would probably be inverting amplifier rather than a
 ;; passive divider, but is an option, especially for reference voltages.
-(struct divider (output-net resistor-top input-top resistor-bottom input-bottom) #:transparent)
+(struct divider (output-net resistor-top resistor-bottom) #:transparent)
 ;;(struct net-port (symbol output-net))
 (struct resistor (value order precision) #:transparent)
 (struct capacitor (value order precision) #:transparent)
 
-(define (output-net e) 'x)
+(struct operation-child (scalar reference))
+(struct negated-integration (children))
+(struct negated-multiplication (scalar children))
 
 (define (expand-sum-child synth feedback)
   (lambda (expr)
@@ -42,7 +44,7 @@
        (list (feedback-closest feedback scalar) (synth child))]
       [child
        (list feedback (synth child))])))
-(struct sum (child-))
+(struct sum (children))
 
 
 
@@ -153,72 +155,126 @@
                      (ld-program-eia program)
                      (ld-program-vdd program)
                      (ld-program-vss program)))
-;; (define (synthesize program)
-;;   (let ([synthesized
-;;          (map
-;;               (ld-program-assigns program))])
-;;     (struct-copy ld-program program [assigns synthesized])))
 
-(define (flatten-network expr)
-  'void
-  ;; (match expr
-  ;;   [(integrator output capacitor output inputs)
-  ;;    (match inputs
-  ;;      [(list (list resistor input)...)
-  ;;        ;;
-  ;;        (let* ([children (for/list ([r resistor] [i input]) (list r (output-net input)))]
-  ;;               [neighbors (map flatten-network input)]
-  ;;               [flattened (integrator output capacitor resistor children)])
-  ;;          (cons flattened neighbors))])]
+(define (make-graph-exprs gensym exprs)
+  (let ([fold (lambda (expr results)
+                (match-let ([(list symbols flattened references) results]
+                            [(list child-symbol child-flattened child-references)
+                             (make-graph-expr gensym expr)])
+                  (list (cons child-symbol symbols)
+                        (append child-flattened flattened)
+                        (append child-references references))))])
+  (foldl fold '('() '() '()) exprs)))
 
-  ;;   [(inverting feedback output inputs)
-  ;;    (match inputs
-  ;;      [(list (list resistor input)...)
-  ;;        (let* ([children (for/list ([r resistor] [i input]) (list r (output-net input)))]
-  ;;               [neighbors (map flatten-network input)]
-  ;;               [flattened (inverting output capacitor resistor children)])
-  ;;          (cons flattened neighbors))])]
+;; get the child symbol(s), the inner flattened, and the internal references
+;; create a copy of this element with the child symbol
+;; merge this into the flattened set.
+(define (make-graph-expr gensym expr)
+  (let ([output-symbol (gensym)])
+    (match expr
+      [(negative child)
+       (match-let* ([(list symbol nested references) (make-graph-expr gensym child)]
+                    [copy (negative symbol)])
+         (list output-symbol (output-symbol (negative symbol)) references))]
+      [(integrate children)
+          (match-let* ([(list child-symbols nested references) (make-graph-exprs gensym children)]
+                       [copy (integrate child-symbols)])
+            (list output-symbol (cons (list output-symbol copy) nested) references))]
+      [(sum children)
+          (match-let* ([(list child-symbols nested references) (make-graph-exprs gensym children)]
+                       [copy (sum child-symbols)])
+            (list output-symbol (cons (list output-symbol copy) nested) references))]
+      [(multiply left right)
+          (match-let* ([(list left-symbol left-nested left-references) (make-graph-expr gensym left)]
+                       [(list right-symbol right-nested right-references) (make-graph-expr gensym right)]
+                       [copy (multiply left-symbol right-symbol)])
+            (list output-symbol
+                  (cons (list output-symbol copy) (append left-nested right-nested))
+                  (append left-references right-references)))]
+      [(constant _)
+       (list output-symbol (list (list output-symbol expr)) '())]
+      [(variable x)
+       (list x '() (list x))])))
 
-  ;;   [(non-inverting feedback output inputs)
-  ;;    (match inputs
-  ;;      [(list (list resistor input)...)
-  ;;        (let* ([children (for/list ([r resistor] [i input]) (list r (output-net input)))]
-  ;;               [neighbors (map flatten-network input)]
-  ;;               [flattened (non-inverting output capacitor resistor children)])
-  ;;          (cons flattened neighbors))])]
+(define (make-graph gensym assigns)
+  (match-let* ([fold (lambda (assign results)
+                (match-let* ([(list assign-symbol expr) assign]
+                             [(list flattened references) results]
+                             [(list _ assign-flattened assign-references)
+                              (make-graph-expr gensym expr)])
+                  (list (append assign-flattened flattened)
+                        (append assign-references references))))]
+               [(list flattened references) (foldl fold '('() '()) (hash->list assigns))]
+               [graph (make-hash flattened)]
+               [found (set-subtract (list->set assigns) (list->set (hash-keys flattened)))])
+    (list graph found)))
 
-  ;;   [(divider output top top-net bottom bottom-net)
-  ;;    (match-let ([(list tr ti) top]
-  ;;                [(list br bi) bottom])
-  ;;      (let* (
-  ;;             [top (tr (output-net ti))]
-  ;;             [bottom (br (output-net bi))]
-  ;;             [neighbors (append (flatten-network ti) (flatten-network bi))]
-  ;;             [flattened (divider output-net top bottom)])
-  ;;        (cons flattened neighbors)))]
+(module+ synthesis-test
+  (require rackunit rackunit/text-ui syntax/macro-testing)
 
-  ;;   [_ '()])
-  );; (reference c) '()]))
+  (define (gensym-counter initial)
+    (let ([counter initial])
+      (lambda ([prefix 'g])
+        (begin (string->symbol (format "~a~a" prefix counter))
+               (set! counter (add1 counter))))))
 
-;;        (let [child (flatten-network input-net)]
-;;          [child-net (first (first child))]
-;;          [net (net-port (gensym "integrator_"))]
-;;          [instance (integrator capacitor resistor inner-net)])
-;;        (cons (list net instance) child)]
-;;     [(inverting (feedback inputs))
-;;       (let [child (flatten-network input-net)]
-;;          [child-net (first (first child))]
-;;          [net (net-port (gensym "integrator_"))]
-;;          [instance (integrator capacitor resistor inner-net)])
-;;        (cons (list net instance) child)]
-;; ;; Non-inverting amplifier, gain is 1 + rf/r1
-;; [(non-inverting (feedback resistor input-net))
-;; ;; Preference would probably be inverting amplifier rather than a
-;; ;; passive divider, but is an option, especially for reference voltages.
-;; [(divider (top top_res bottom bottom_res))
-;; [(net-port (symbol))]
-;; [(input-port (output-net))]
-;; [(output-port (input-net))]
-;; [(resistor (value order precision))]
-;; [(capacitor (value order precision))]
-;; )
+  (define synth (curry synthesize-expr eia-12 -9 9))
+  (define collapse-addition-tests
+    (test-suite
+     [test-case "Two term addition"
+       (check-equal? (collapse-add (add (variable 'a) (variable 'b)))
+                     (sum (list (variable 'a) (variable 'b))))]
+     [test-case "Nested right addition"
+       (check-equal? (collapse-add (add (variable 'a) (add (variable 'b) (variable 'c))))
+                     (sum (list (variable 'a) (variable 'b) (variable 'c))))]
+     [test-case "Nested left addition"
+       (check-equal? (collapse-add (add (add (variable 'a) (variable 'b)) (variable 'c)))
+                     (sum (list (variable 'a) (variable 'b) (variable 'c))))]
+     [test-case "Nested both addition"
+       (check-equal? (collapse-add (add (add (variable 'a) (variable 'b)) (add (variable 'c) (variable 'd))))
+                     (sum (list (variable 'a) (variable 'b) (variable 'c) (variable 'd))))]
+     [test-case "Internal addition to an integrate"
+       (check-equal? (collapse-add (integrate (add (variable 'a) (variable 'b))))
+                     (integrate (sum (list (variable 'a) (variable 'b)))))]
+     [test-case "Internal addition to a multiply"
+       (check-equal? (collapse-add (multiply (constant 1) (add (variable 'a) (variable 'b))))
+                     (multiply (constant 1) (sum (list (variable 'a) (variable 'b)))))]
+     [test-case "Internal addition to a negative"
+       (check-equal? (collapse-add (negative (add (variable 'a) (variable 'b))))
+                     (negative (sum (list (variable 'a) (variable 'b)))))]))
+  (define flatten-graph-tests
+    (test-suite
+     [test-case "Recognize a transitive constant reference"
+       (match-let* ([assigns (make-hash 'a (variable 'b)
+                                  'b (constant 1))]
+                    [(list graph found) (make-graph (gensym-counter 0) assigns)])
+         (check-equal? assigns graph)
+         (check-equal? found '()))]
+     [test-case "Recognize found constant"
+       (match-let* ([assigns (make-hash 'a (variable 'b))]
+                    [(list graph found) (make-graph (gensym-counter 0) assigns)])
+         (check-equal? found (list 'b)))]
+     [test-case "Flatten an addition"
+       (match-let* ([assigns (make-hash 'a (sum (constant 1) (negative 'b))
+                                  'b (constant 1))]
+                    [(list graph found) (make-graph (gensym-counter 0) assigns)])
+         (check-equal? (hash-ref graph 'a (sum 'g0 'g1)))
+         (check-equal? (hash-ref graph 'b (constant 1)))
+         (check-equal? (hash-ref graph 'g0 (constant 1)))
+         (check-equal? (hash-ref graph 'g1 (negative 'b)))
+         (check-equal? found (list 'b 'g0 'g1)))]))
+
+  (define synthesis-tests
+    (test-suite
+     [test-case "Synthesize a divider"
+       (let ([result (synth (constant 4))])
+         (check-true (divider? result)))]
+     ;; [test-case "Synthesize a nested addition"
+     ;;   (let ([result (synth (sum (constant
+
+
+     ;;    (check-equal? (
+    ))
+  (run-tests collapse-addition-tests)
+  (run-tests flatten-graph-tests)
+  (run-tests synthesis-tests))
