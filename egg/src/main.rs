@@ -141,15 +141,18 @@ impl egg::CostFunction<LinDiff4w> for LinDiff4wCostFn {
         C: FnMut(Id) -> Self::Cost,
     {
         let op_cost = match enode {
+            // These should be eliminated.
             LinDiff4w::Add(..) => 10000,
             LinDiff4w::Integrate(..) => 10000,
             LinDiff4w::Mult(..) => 10000,
+            // These have no overhead.
             LinDiff4w::Symbol(..) => 0,
             LinDiff4w::Constant(..) => 0,
             LinDiff4w::ConstMult(..) => 0,
             LinDiff4w::ConstAdd(..) => 0,
             LinDiff4w::ConstSub(..) => 0,
             LinDiff4w::Weight(..) => 0,
+            // Everything else is a size 1 amp.
             _ => 1
         };
         enode.fold(op_cost, |sum, i| sum + costs(i))
@@ -171,6 +174,9 @@ pub fn rules4w() -> Vec<Rewrite4w> {
         // Negation
         rw!("factor-neg"; "($ (- ?a) (- ?b) (- ?c) (- ?d))" => "(- ($ ?a ?b ?c ?d))"),
         rw!("distrib-neg"; "(- ($ ?a ?b ?c ?d))" => "($ (- ?a) (- ?b) (- ?c) (- ?d))"),
+        rw!("integrate-neg-factor"; "(I (- ?a))" => "(- (I ?a))"),
+        rw!("integrate-neg-dist"; "(- (I ?a))" => "(I (- ?a))"),
+
         rw!("integrate-0"; "(I 0)" => "0"),
         rw!("0-neg"; "0" => "(- 0)"),
         rw!("neg-0"; "(- 0)" => "0"),
@@ -193,7 +199,7 @@ pub fn rules4w() -> Vec<Rewrite4w> {
         rw!("weight-neg"; "(w ?a (- ?b))" => "(- (w ?a ?b))"),
         rw!("weight-distrib"; "(- (w ?a ?b))" => "(w ?a (- ?b))"),
         rw!("weight-add"; "($ (w ?m ?a) (w ?n ?a) ?b ?c)" => "($ (w (c+ ?m ?n) ?a) ?b ?c 0)"),
-        rw!("weight-sub"; "($ (w ?m ?a) (w ?n (- ?a)) ?b ?c)" => "($ (w (c- ?m ?n) ?a) ?b ?c 0)"
+        rw!("weight-sub"; "($ (w ?m ?a) (- (w ?n ?a)) ?b ?c)" => "($ (w (c- ?m ?n) ?a) ?b ?c 0)"
             if is_greater_than_4w("?m", "?n")),
 
         // Neighbors
@@ -203,32 +209,12 @@ pub fn rules4w() -> Vec<Rewrite4w> {
             "($ ($ ?b ?s ?t ?u) ($ ?a ?v ?w ?x) ?y ?z)"),
 
         // Commutative properties
-        rw!("commute-sum-1"; "($ ?a ?b ?c ?d)" => "($ ?a ?b ?d ?c)"),
-        rw!("commute-sum-2"; "($ ?a ?b ?c ?d)" => "($ ?a ?c ?b ?d)"),
-        rw!("commute-sum-3"; "($ ?a ?b ?c ?d)" => "($ ?a ?c ?d ?b)"),
-        rw!("commute-sum-4"; "($ ?a ?b ?c ?d)" => "($ ?a ?d ?b ?c)"),
+        rw!("commute-sum-1"; "($ ?a ?b ?c ?d)" => "($ ?b ?a ?c ?d)"),
+        rw!("commute-sum-2"; "($ ?a ?b ?c ?d)" => "($ ?c ?b ?a ?d)"),
+        rw!("commute-sum-3"; "($ ?a ?b ?c ?d)" => "($ ?d ?b ?c ?a)"),
+        rw!("commute-sum-4"; "($ ?a ?b ?c ?d)" => "($ ?a ?c ?b ?d)"),
         rw!("commute-sum-5"; "($ ?a ?b ?c ?d)" => "($ ?a ?d ?c ?b)"),
-
-        rw!("commute-sum-6"; "($ ?a ?b ?c ?d)" => "($ ?b ?a ?c ?d)"),
-        rw!("commute-sum-7"; "($ ?a ?b ?c ?d)" => "($ ?b ?a ?d ?c)"),
-        rw!("commute-sum-8"; "($ ?a ?b ?c ?d)" => "($ ?b ?c ?a ?d)"),
-        rw!("commute-sum-9"; "($ ?a ?b ?c ?d)" => "($ ?b ?c ?d ?a)"),
-        rw!("commute-sum-10"; "($ ?a ?b ?c ?d)" => "($ ?b ?d ?a ?c)"),
-        rw!("commute-sum-11"; "($ ?a ?b ?c ?d)" => "($ ?b ?d ?c ?a)"),
-
-        rw!("commute-sum-12"; "($ ?a ?b ?c ?d)" => "($ ?c ?a ?b ?d)"),
-        rw!("commute-sum-13"; "($ ?a ?b ?c ?d)" => "($ ?c ?a ?d ?b)"),
-        rw!("commute-sum-14"; "($ ?a ?b ?c ?d)" => "($ ?c ?b ?a ?d)"),
-        rw!("commute-sum-15"; "($ ?a ?b ?c ?d)" => "($ ?c ?b ?d ?a)"),
-        rw!("commute-sum-16"; "($ ?a ?b ?c ?d)" => "($ ?c ?d ?a ?b)"),
-        rw!("commute-sum-17"; "($ ?a ?b ?c ?d)" => "($ ?c ?d ?b ?a)"),
-
-        rw!("commute-sum-18"; "($ ?a ?b ?c ?d)" => "($ ?d ?a ?b ?c)"),
-        rw!("commute-sum-19"; "($ ?a ?b ?c ?d)" => "($ ?d ?a ?c ?b)"),
-        rw!("commute-sum-20"; "($ ?a ?b ?c ?d)" => "($ ?d ?b ?a ?c)"),
-        rw!("commute-sum-21"; "($ ?a ?b ?c ?d)" => "($ ?d ?b ?c ?a)"),
-        rw!("commute-sum-22"; "($ ?a ?b ?c ?d)" => "($ ?d ?c ?b ?a)"),
-        rw!("commute-sum-23"; "($ ?a ?b ?c ?d)" => "($ ?d ?c ?a ?b)"),
+        rw!("commute-sum-6"; "($ ?a ?b ?c ?d)" => "($ ?a ?b ?d ?c)"),
     ]
 }
 
@@ -328,6 +314,7 @@ impl egg::CostFunction<LinDiff2w> for LinDiff2wCostFn {
             LinDiff2w::ConstMult(..) => 0,
             LinDiff2w::ConstAdd(..) => 0,
             LinDiff2w::ConstSub(..) => 0,
+            LinDiff2w::Constant(..) => 0,
             LinDiff2w::Weight(..) => 0,
             _ => 1,
         };
@@ -361,6 +348,9 @@ pub fn rules2w() -> Vec<Rewrite2w> {
         // Negation
         rw!("factor-neg"; "($ (- ?a) (- ?b))" => "(- ($ ?a ?b))"),
         rw!("distrib-neg"; "(- ($ ?a ?b))" => "($ (- ?a) (- ?b))"),
+        rw!("integrate-neg-factor"; "(I (- ?a))" => "(- (I ?a))"),
+        rw!("integrate-neg-distrib"; "(- (I ?a))" => "(I (- ?a))"),
+
         rw!("integrate-0"; "(I 0)" => "0"),
         rw!("double-neg"; "(- (- ?a))" => "?a"),
         rw!("neg-double"; "?a" => "(- (- ?a))"),
@@ -393,7 +383,7 @@ pub fn rules2w() -> Vec<Rewrite2w> {
 }
 
 fn main() {
-    let expr: RecExpr<LinDiff4w> = "(+ (+ (* 4 h) (* 5 g)) (- (+ (- (* 6 i)) (* 1 i))))".parse().unwrap();
+    let expr: RecExpr<LinDiff4w> = "(+ (- (+ (- (* 6 j)) (* 1 j))) (+ (* 4 h) (* 5 g)))".parse().unwrap();
     // let expr: RecExpr<LinDiff> = "(+ (+ x z) (+ w (- x)))".parse().unwrap();
     // let expr: RecExpr<LinDiff> = "(- (+ x (- x)))".parse().unwrap();
     let r = rules4w();
@@ -405,7 +395,7 @@ fn main() {
 
     println!("Cost: {}", best_cost);
     println!("Expr: {}", best_expr);
-//    runner.egraph.dot().to_pdf("graph.pdf").unwrap();
+   // runner.egraph.dot().to_pdf("graph.pdf").unwrap();
 }
 
 egg::test_fn! {
