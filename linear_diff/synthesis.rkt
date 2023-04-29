@@ -1,5 +1,6 @@
 #lang racket
 (require "resistors.rkt" "dsl.rkt")
+(require data/queue)
 
 (provide synthesizer
          synthesize-expr
@@ -16,145 +17,100 @@
 ;; all summations or integration should be wrapped in either negation or double negation.
 ;; push negations up from children to summation.
 ;; if more children are negation, negate the summation and distribute negation. otherwise double negate.
-
-;;;; Devices
-;; Vout(t1) = Vout(t0) - 1/RC * (integral 0 to t1 Vin(t)dt)
-(struct integrator (capacitor resistor output-net input-nets) #:transparent)
-;; Inputs are pairs '(resistor . input-net). Summation is inverting.
-(struct inverting (feedback output-net input-nets) #:transparent)
-;; Non-inverting amplifier, gain is 1 + rf/r1, BUT it shifts the phase so not really usable.
-
-;; Preference would probably be inverting amplifier rather than a
-;; passive divider, but is an option, especially for reference voltages.
-(struct divider (output-net resistor-top resistor-bottom) #:transparent)
-;;(struct net-port (symbol output-net))
-(struct resistor (value order precision) #:transparent)
-(struct capacitor (value order precision) #:transparent)
-
 (struct operation-child (scalar reference))
 (struct negated-integration (children))
 (struct negated-multiplication (scalar children))
 
-(define (expand-sum-child synth feedback)
-  (lambda (expr)
-    (match expr
-      [(negative (multiply scalar child))
-       (list (feedback-closest feedback scalar) (synth (negative child)))]
-      [(multiply scalar child)
-       (list (feedback-closest feedback scalar) (synth child))]
-      [child
-       (list feedback (synth child))])))
-(struct sum (children))
+(define (normalize-sum-child expr assigns)
+  (match (hash-ref expr assigns)
+    [(negative child)
+     (match (hash-ref child assigns)
+       [
+     (list (operation-child 1 child) ]
+    [(multiply scalar child)
+     (list (operation-child scalar child) '() '())]
+    [child
+     (operation-child 1 child)]))
+
+(define (normalize-sum-children children assigns) 'void)
+
+(define (normalize-sum-child-neg child assigns) 'void)
+
+(define (normalize-sum-children-neg children assigns) 'void)
 
 
+;; return:
+;; the normalized expression for given.
+;; new graph nodes
+;; nodes to add to queue
+(define (normalize id assigns)
+  (match (hash-ref id assigns)
+    [(negative child)
+     (match (hash-ref child assigns)
+       [(negative subchild)
+        (normalize subchild assigns)]
+       [(integrate child)
+        (match-let
+            ([(list child-ids new-assigns)  (normalize-sum-child child assigns)])
+          (list (negated-integration child-ids) new-assigns child-ids))]
+       [(multiply (constant scalar) child) #:when (>= scalar 0)
+        (match-let
+            ([(list child-ids new-assigns) (normalize-sum-child child assigns)])
+          (list (negated-multiplication scalar child-ids) new-assigns child-ids))]
+       [(multiply (constant scalar) child) #:when (< scalar 0)
+        (match-let
+            ([(list child-ids new-assigns) (normalize-sum-child-neg child assigns)])
+          (list (negated-multiplication (- scalar) child-ids) new-assigns child-ids))]
+       [(sum children)
+        (match-let
+            ([(list child-ids new-assigns) (normalize-sum-children children assigns)])
+          (list (negated-multiplication 1 child-ids) new-assigns child-ids))]
+       [(constant scalar) 'void] ;; todo constant
+       )]
+    [(multiply (constant scalar) child) #:when (>= scalar 0)
+     (match-let
+         ([(list child-ids new-assigns) (normalize-sum-children-neg children assigns)])
+       (list (negated-multiplication scalar child-ids) new-assigns child-ids))]
+    [(multiply (constant scalar) child) #:when (< scalar 0)
+     (match-let
+         ([(list child-ids new-assigns) (normalize-sum-children children assigns)])
+       (list (negated-multiplication (- scalar) child-ids) new-assigns child-ids))]
+    [(integrate child)
+     (match-let
+         ([(list child-ids new-assigns) (normalize-sum-children-neg children assigns)])
+       (list (negated-integration scalar child-ids) new-assigns child-ids))]
+    [(sum children)
+     (match-let
+         ([(list child-ids new-assigns) (normalize-sum-children-neg children assigns)])
+       (list (negated-multiplication 1 child-ids) new-assigns child-ids))]
+    [(constant scalar) (list (constant scalar) '() '())]))
 
-(define (normalize-sum-child normalize)
-  (lambda (expr)
-    (match expr
-      [(negative (multiply scalar child))
-       (multiply scalar (negative (normalize child)))]
-      [(multiply scalar child)
-       (multiply scalar (normalize child))]
-      [child
-       (multiply (constant 1) (normalize child))])))
+  ;; (match expr
+  ;;   ;; integral also can sum
+  ;;   [(negative (integrate (sum child-exprs)))
+  ;;    (negative (integrate
+  ;;               (sum (map (normalize-sum-child normalize ) child-exprs))))]
+  ;;   [(integrate (negative (sum child-exprs)))
+  ;;    (negative (integrate
+  ;;               (sum (map (curry normalize-sum-child normalize) child-exprs))))]
+  ;;   [(integrate (sum child-exprs))
+  ;;    (negative (integrate
+  ;;               (sum (map (lambda (child-expr) (normalize-sum-child normalize (negative child-expr))) child-exprs))))]
+  ;;   [(integrate child-expr)
+  ;;    (negative (integrate
+  ;;               (sum (normalize-sum-child normalize (negative child-expr)))))]
+  ;;   [(negative (sum child-exprs))
+  ;;    (negative (sum (map (curry normalize-sum-child normalize) child-exprs)))]
+  ;;   [(sum child-exprs)
+  ;;    (negative (sum
+  ;;               (map (lambda (child-expr) (normalize-sum-child normalize (negative child-expr))) child-exprs)))]
+  ;;   [(negative (multiply scalar child-expr))
+  ;;    (negative (multiply scalar (normalize child-expr)))]
+  ;;   [(multiply scalar child-expr)
+  ;;    (negative (multiply scalar (normalize (negative child-expr))))]
+  ;;   [(negative child-expr)
+  ;;    (negative (normalize child-expr))]))
 
-(define (collapse-add expr)
-  (match expr
-    [(add a b)
-     (let ([x (collapse-add a)]
-           [y (collapse-add b)])
-       (match (list x y)
-                [(list (sum j) (sum k )) (sum (append j k))]
-                [(list (sum j) k) (sum (cons k j))]
-                [(list j (sum k)) (sum (cons j k))]
-                [(list j k) (sum '(j k))]))]
-    [(integrate y) (integrate (collapse-add y))]
-    [(negative y) (negative (collapse-add y))]
-    [(multiply x y) (multiply (collapse-add x) (collapse-add y))]
-    [x x]))
-
-(define (normalize expr)
-  (match expr
-    ;; integral also can sum
-    [(negative (integrate (sum child-exprs)))
-     (negative (integrate (sum (map (normalize-sum-child normalize ) child-exprs))))]
-
-    [(integrate (negative (sum child-exprs)))
-     (negative (integrate (sum (map (curry normalize-sum-child normalize) child-exprs))))]
-
-    [(integrate (sum child-exprs))
-     (negative (negative (integrate
-                          (sum (map (curry normalize-sum-child normalize) child-exprs)))))]
-
-    [(integrate child-expr)
-(negative (negative (integrate (sum (curry normalize-sum-child normalize) child-expr))))]
-
-    [(negative (sum child-exprs))
-     (negative (sum (map (curry normalize-sum-child normalize) child-exprs)))]
-
-    [(sum child-exprs)
-     (negative (negative (sum (map (curry normalize-sum-child normalize) child-exprs))))]
-
-    [(negative (multiply scalar child-expr))
-     (negative (multiply scalar (normalize child-expr)))]
-
-    [(negative child-expr)
-     (negative (normalize child-expr))]
-
-    [(multiply scalar child-expr)
-     (multiply scalar (normalize child-expr))]
-
-    [x x]))
-
-(define (child-for-feedback eia feedback child)
-  (match child [(multiply (constant scalar) input) (list (feedback-closest eia feedback scalar) input)]))
-
-(define (synthesize-expr eia power-vdd power-vss expr)
-  (letrec ([synth (lambda (expr)
-    (match expr
-      ;; integral also can sum
-      [(negative (integrate (sum child-exprs)))
-       (integrator (gensym)
-                   (resistor 1 10 5)
-                   (capacitor 1 -10 20)
-                   (map
-                    (compose
-                     (match-lambda [(list res child) (list res (synth child))])
-                     (curry child-for-feedback eia (resistor 1 10 5)))
-                    child-exprs))]
-
-      [(negative (sum child-exprs))
-       (let* (
-              [feedback (resistor 1 'k 1)]
-              [child-transform (compose (match-lambda [(list res child) (list res (synth child))])
-                                        (curry child-for-feedback eia feedback))]
-              [children (map child-transform child-exprs)]
-              [id (gensym)])
-       (inverting id feedback children))]
-
-      [(negative child-expr)
-       (inverting (gensym) (resistor 1 3 1) (synth child-expr))]
-
-      [(negative (multiply scalar child-expr))
-       (inverting (gensym) (feedback-closest scalar) (synth child-expr))]
-
-      [(multiply scalar child-expr)
-       (negative (synth (negative expr)))]
-      [(constant scalar)
-       (match-let ([(cons order (cons top bottom)) (divider-closest eia power-vdd power-vss scalar)])
-         (divider (gensym)
-                  (resistor top order 10)
-                  power-vdd
-                  (resistor bottom order 10)
-                  power-vss))]
-
-      [ref ref]))])
-    (synth (normalize (collapse-add expr)))))
-
-(define (synthesizer program) (curry synthesize-expr
-                     (ld-program-eia program)
-                     (ld-program-vdd program)
-                     (ld-program-vss program)))
 
 (define (make-graph-exprs gensym exprs)
   (let ([fold (lambda (expr results)
