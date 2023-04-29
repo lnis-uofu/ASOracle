@@ -382,7 +382,25 @@ pub fn rules2w() -> Vec<Rewrite2w> {
     ]
 }
 
-fn main() {
+fn main2() {
+    let script = "(+ (- (+ (- (* 6 j)) (* 1 j))) (+ (* 4 h) (* 5 g)))";
+    println!("{}", script);
+        let expr: RecExpr<LinDiff2w> = script.parse().unwrap();
+    // let expr: RecExpr<LinDiff> = "(+ (+ x z) (+ w (- x)))".parse().unwrap();
+    // let expr: RecExpr<LinDiff> = "(- (+ x (- x)))".parse().unwrap();
+    let r = rules2w();
+    let runner = Runner::default().with_expr(&expr).run(&r);
+
+    let extractor = Extractor::new(&runner.egraph, LinDiff2wCostFn);
+    // let extractor = Extractor::new(&runner.egraph, AstSize);
+    let (best_cost, best_expr) = extractor.find_best(runner.roots[0]);
+
+    println!("Cost: {}", best_cost);
+    println!("Expr: {}", best_expr);
+   // runner.egraph.dot().to_pdf("graph.pdf").unwrap();
+}
+
+fn main4() {
     let expr: RecExpr<LinDiff4w> = "(+ (- (+ (- (* 6 j)) (* 1 j))) (+ (* 4 h) (* 5 g)))".parse().unwrap();
     // let expr: RecExpr<LinDiff> = "(+ (+ x z) (+ w (- x)))".parse().unwrap();
     // let expr: RecExpr<LinDiff> = "(- (+ x (- x)))".parse().unwrap();
@@ -396,7 +414,13 @@ fn main() {
     println!("Cost: {}", best_cost);
     println!("Expr: {}", best_expr);
    // runner.egraph.dot().to_pdf("graph.pdf").unwrap();
+
 }
+fn main() {
+    main2();
+    main4();
+}
+
 
 egg::test_fn! {
     cancellation_1, rules(), "($ (- a) a c d)" => "($ c d 0 0)"
@@ -415,5 +439,9 @@ egg::test_fn! {
 }
 
 egg::test_fn! {
-    complicated, rules(), "(+ c (- (+ (- b) (+ a b))))" => "($ (- a) c 0 0)"
+    complicated, rules(), "(+ c (- (+ (- b) (+ a b))))" => "(+ c (- a))"
+}
+
+egg::test_fn! {
+    complicated_miss, rules(), "(+ c (- (+ (- b) (+ a b))))" => "(+ (- a) c)"
 }
