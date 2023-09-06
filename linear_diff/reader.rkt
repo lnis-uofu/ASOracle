@@ -1,6 +1,6 @@
 #lang racket
 
-(require "parser.rkt" "lexer.rkt" syntax/strip-context)
+(require linear_diff/parser linear_diff/lexer linear_diff/dsl syntax/strip-context)
 
 (provide (rename-out [dsl-read read]
                      [dsl-read-syntax read-syntax]))
@@ -12,5 +12,5 @@
 (define (dsl-read-syntax path port)
   (define parse-tree (parse path (tokenize path port)))
   (strip-context
-   #`(module basic-mod linear_diff/expander
+   #`(module linear-mod linear_diff/expander
        #,parse-tree)))

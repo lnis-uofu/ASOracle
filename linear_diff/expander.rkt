@@ -2,13 +2,11 @@
 (require (for-syntax syntax/parse))
 (require (for-syntax racket/syntax))
 
-(require "resistors.rkt" "dsl.rkt")
+(require linear_diff/resistors linear_diff/dsl)
 
-(provide vss gnd vdd negation integration multiplication constant
-         addition subtraction eia input output design assign variable
+(provide dsl-expand vss gnd vdd negation integration multiplication constant assign variable
+         addition subtraction eia input output design (struct-out ld-program)
          eia-96 eia-48 eia-24 eia-12)
-
-(provide dsl-expand)
 
 (define (setup-system lines)
   (define system (ld-program 0 0 0 "test" eia-96 empty empty (make-hash)))
@@ -37,7 +35,7 @@
   (syntax-case stx ()
     [(_ name)
      #'(lambda (system)
-         (set-ld-program-design! system 'name))]))
+         (set-ld-program-design! system name))]))
 
 (define-syntax (vdd stx)
   (syntax-case stx ()
@@ -67,53 +65,53 @@
   (syntax-case stx ()
     [(_ name expr)
      #'(lambda (system)
-         (hash-set! (ld-program-assigns system) 'name expr))]))
+         (hash-set! (ld-program-assigns system) (quote name) expr))]))
 
 (define-syntax (input stx)
   (syntax-case stx ()
     [(_ name)
      #'(lambda (system)
          (set-ld-program-inputs! system
-           (cons 'name (ld-program-inputs system))))]))
+           (cons (quote name) (ld-program-inputs system))))]))
 
 (define-syntax (output stx)
   (syntax-case stx ()
     [(_ name)
      #'(lambda (system)
          (set-ld-program-outputs! system
-          (cons 'name (ld-program-outputs system))))]))
+          (cons (quote name) (ld-program-outputs system))))]))
 
 (define-for-syntax (expand-expr stx)
   (syntax-case stx (constant negation integration division multiplication subtraction addition variable)
-    [(constant c) #'(constant c)]
-    [(variable v) #'(variable 'v)]
+    [(constant c) #'(const c)]
+    [(variable v) #'(var 'v)]
     [(negation expr)
-     (syntax-case (expand-expr #'expr) (constant)
-       [(constant c) #'(constant (- c))]
+     (syntax-case (expand-expr #'expr) (const)
+       [(const c) #'(const (- c))]
        [n #'(negative n)])]
     [(integration expr)
      (syntax-case (expand-expr #'expr) (negative)
        [(negative x) #'(negative (integrate x))]
        [n #'(integrate n)])]
     [(division left right)
-     (syntax-case (list (expand-expr #'left) (expand-expr #'right)) (constant)
-       [((constant l) (constant r)) #'(constant (/ l r))])]
+     (syntax-case (list (expand-expr #'left) (expand-expr #'right)) (const)
+       [((const l) (const r)) #'(const (/ l r))])]
     [(multiplication left right)
-     ;; left side multiplication must be a constant term.
-     (syntax-case (list (expand-expr #'left) (expand-expr #'right)) (constant)
-       [((constant t) (constant u)) #'(constant (* t u))]
-       [(_ (constant 0)) #'(constant 0)]
-       [((constant 0) _) #'(constant 0)]
-       [(y (constant x))
-        #'(multiply (constant x) y)]
-       [((constant x) y)
-          #'(multiply (constant x) y)])]
+     ;; left side multiplication must be a const term.
+     (syntax-case (list (expand-expr #'left) (expand-expr #'right)) (const)
+       [((const t) (const u)) #'(const (* t u))]
+       [(_ (const 0)) #'(const 0)]
+       [((const 0) _) #'(const 0)]
+       [(y (const x))
+        #'(multiply (const x) y)]
+       [((const x) y)
+          #'(multiply (const x) y)])]
     [(subtraction left right)
      (expand-expr #'(addition left (negation right)))]
     [(addition left right)
-     (syntax-case (list (expand-expr #'left) (expand-expr #'right)) (constant)
-       [((constant t) (constant u)) #'(constant (+ t u))]
-       [x #'(add x)])]))
+     (syntax-case (list (expand-expr #'left) (expand-expr #'right)) (const)
+       [((const t) (const u)) #'(const (+ t u))]
+       [(x y) #'(add x y)])]))
 
 ;;;;;;;; Expressions ;;;;;;;;
 (define-syntax (negation stx) (expand-expr stx))
@@ -122,6 +120,8 @@
 (define-syntax (multiplication stx) (expand-expr stx))
 (define-syntax (subtraction stx) (expand-expr stx))
 (define-syntax (addition stx) (expand-expr stx))
+(define-syntax (variable stx) (expand-expr stx))
+(define-syntax (constant stx) (expand-expr stx))
 
 ;;;;;;;; Language expansion ;;;;;;;;
 (define-syntax (dsl-expand stx)
@@ -141,44 +141,44 @@
      "Constant expansion"
      [test-case "Simple addition collapse"
        (check-equal? (addition (constant 2) (constant 3))
-                     (constant 5))]
+                     (const 5))]
      [test-case "Simple addition of negative collapse"
        (check-equal? (addition (constant 2) (negation (constant 3)))
-                     (constant -1))]
+                     (const -1))]
      [test-case "Simple addition of negative collapse"
        (check-equal? (addition (constant 2) (addition (constant 3) (addition (constant 4) (constant 5))))
-                     (constant (+ 2 (+ 3 (+ 4 5)))))]
+                     (const (+ 2 (+ 3 (+ 4 5)))))]
      [test-case "Simple subtraction collapse"
        (check-equal? (subtraction (constant 2) (constant 3))
-                     (constant (- 2 3)))]
+                     (const (- 2 3)))]
      [test-case "Negative subtraction collapse"
        (check-equal? (subtraction (constant 2) (negation (constant 3)))
-                     (constant (- 2 (- 3))))]
+                     (const (- 2 (- 3))))]
      [test-case "Simple multiplication collapse"
        (check-equal? (multiplication (constant 3) (constant 4))
-                     (constant (* 3 4)))]
+                     (const (* 3 4)))]
      [test-case "Nested addition in multiplication right term"
        (check-equal? (multiplication (constant 3) (addition (constant 4) (constant 5)))
-                     (constant (* 3 (+ 4 5))))]
+                     (const (* 3 (+ 4 5))))]
      [test-case "Nested addition in multiplication left term"
        (check-equal? (multiplication (addition (constant 4) (constant 5)) (constant 3))
-                     (constant (* (+ 4 5) 3)))]
+                     (const (* (+ 4 5) 3)))]
      [test-case "Nested addition in multiplication both term"
        (check-equal? (multiplication (addition (constant 4) (constant 5)) (addition (constant 3) (constant 2)))
-                     (constant (* (+ 4 5) (+ 3 2))))]
+                     (const (* (+ 4 5) (+ 3 2))))]
      [test-case "Simple division collapse"
        (check-equal? (division (constant 3) (constant 4))
-                     (constant (/ 3 4)))]
+                     (const (/ 3 4)))]
      [test-case "Nested addition in division right term"
        (check-equal? (division (constant 3) (addition (constant 4) (constant 5)))
-                     (constant (/ 3 (+ 4 5))))]
+                     (const (/ 3 (+ 4 5))))]
      [test-case "Nested addition in division left term"
        (check-equal? (division (addition (constant 4) (constant 5)) (constant 3))
-                     (constant (/ (+ 4 5) 3)))]
+                     (const (/ (+ 4 5) 3)))]
      [test-case "Nested addition in division both term"
        (check-equal? (division (addition (constant 4) (constant 5))
                                (addition (constant 3) (constant 2)))
-                     (constant (/ (+ 4 5) (+ 3 2))))]
+                     (const (/ (+ 4 5) (+ 3 2))))]
      [test-case "Non-constant division"
        (check-exn exn:fail:syntax?
                   (lambda () (convert-syntax-error
