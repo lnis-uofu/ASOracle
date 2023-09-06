@@ -4,7 +4,7 @@
 
 (require "resistors.rkt" "dsl.rkt")
 
-(provide vss gnd vdd negation integration multiplication
+(provide vss gnd vdd negation integration multiplication constant
          addition subtraction eia input output design assign variable
          eia-96 eia-48 eia-24 eia-12)
 
@@ -84,8 +84,9 @@
           (cons 'name (ld-program-outputs system))))]))
 
 (define-for-syntax (expand-expr stx)
-  (syntax-case stx (constant negation integration division multiplication subtraction addition)
+  (syntax-case stx (constant negation integration division multiplication subtraction addition variable)
     [(constant c) #'(constant c)]
+    [(variable v) #'(variable 'v)]
     [(negation expr)
      (syntax-case (expand-expr #'expr) (constant)
        [(constant c) #'(constant (- c))]
