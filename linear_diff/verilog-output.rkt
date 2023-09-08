@@ -1,5 +1,5 @@
 #lang racket
-(require linear_diff/expander linear_diff/synthesis linear_diff/resistors)
+(require linear_diff/techmap linear_diff/synthesis linear_diff/resistors)
 (require racket/format)
 (provide write-verilog)
 

@@ -6,7 +6,7 @@
          (struct-out multiply)
          (struct-out integrate)
          (struct-out const)
-         (struct-out var))
+         (struct-out reference))
 
 ;;;;;;;; DSL AST post expansion ;;;;;;;;
 (struct ld-program (vdd vss gnd design eia inputs outputs assigns) #:mutable #:transparent)
@@ -15,4 +15,4 @@
 (struct negative (expr) #:transparent)
 (struct multiply (constant expr) #:transparent)
 (struct const (scalar) #:transparent)
-(struct var (name) #:transparent)
+(struct reference (name) #:transparent)

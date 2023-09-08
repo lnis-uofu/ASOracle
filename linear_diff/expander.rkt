@@ -84,7 +84,7 @@
 (define-for-syntax (expand-expr stx)
   (syntax-case stx (constant negation integration division multiplication subtraction addition variable)
     [(constant c) #'(const c)]
-    [(variable v) #'(var 'v)]
+    [(variable v) #'(reference 'v)]
     [(negation expr)
      (syntax-case (expand-expr #'expr) (const)
        [(const c) #'(const (- c))]
