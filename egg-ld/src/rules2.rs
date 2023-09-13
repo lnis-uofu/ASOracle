@@ -199,3 +199,4 @@ egg::test_fn! {
     balance, rules2(), "(+ a (+ b (+ c (+ d (+ e (+ f (+ g h)))))))" =>
         "($ ($ ($ a b) ($ c d)) ($ ($ e f) ($ g h)))"
 }
+ 

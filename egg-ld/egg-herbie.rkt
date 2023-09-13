@@ -57,10 +57,6 @@
       [(list op prec)
        (match-define (list '$Type otype) prec)
        (list (get-parametric-constant op (get-representation otype)))]
-      [(list op prec args ...)
-       (match-define (list '$Type otype itypes ...) prec)
-       (define op* (apply get-parametric-operator op (map get-representation itypes)))
-       (cons op* (map loop args))]
       [(? number?)
        expr]
       [_

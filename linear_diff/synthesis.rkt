@@ -1,7 +1,9 @@
 #lang racket
-(require "resistors.rkt" "dsl.rkt")
+(require linear_diff/resistors linear_diff/dsl linear_diff/egg)
 
 (define (synthesize program) program)
+
+(define (optimize terms) )
 
 (define (flatten assigns)
   (append (map (match-lambda [(list symbol expr) (flatten-expr symbol expr gensym)]) assigns)))
@@ -26,10 +28,6 @@
      (list symbol (list (list symbol (const scalar))))]
     [(reference name)
      (list name '())]))
-
-(struct summing (inl inr))
-(struct integrating (in))
-(struct weight (value id))
 
 (module+ test
   (require rackunit rackunit/text-ui )
@@ -59,5 +57,6 @@
                           (list (list 'a (negative 'g0))
                                 (list 'g0 (multiply 'g1 'b))
                                 (list 'g1 (const 5)))))]))
+   
 
   (run-tests flatten-tests))
