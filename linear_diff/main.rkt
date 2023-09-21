@@ -1,5 +1,5 @@
 #lang racket/base
-(require linear_diff/verilog-output linear_diff/spice-output)
+(require "verilog-output.rkt" "spice-output.rkt")
 (module reader racket
   (provide read-syntax)
-  (require linear_diff/reader linear_diff/dsl))
+  (require "reader.rkt" "dsl.rkt"))

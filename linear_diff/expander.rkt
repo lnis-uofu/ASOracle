@@ -2,7 +2,7 @@
 (require (for-syntax syntax/parse))
 (require (for-syntax racket/syntax))
 
-(require linear_diff/resistors linear_diff/dsl)
+(require "resistors.rkt" "dsl.rkt")
 
 (provide dsl-expand vss gnd vdd negation integration multiplication constant assign variable
          addition subtraction eia input output design (struct-out ld-program)

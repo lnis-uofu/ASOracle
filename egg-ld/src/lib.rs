@@ -1,19 +1,30 @@
 #![allow(clippy::missing_safety_doc)]
 
-pub mod math;
-pub mod rules;
+pub mod rules2;
 
 use egg::{Extractor, Id, Language, StopReason, Symbol};
 use indexmap::IndexMap;
 use libc::c_void;
-use math::*;
+use rules2::*;
 
 use std::cmp::min;
 use std::ffi::{CStr, CString};
 use std::mem::{self, ManuallyDrop};
 use std::os::raw::c_char;
 use std::time::Duration;
-use std::{slice, sync::atomic::Ordering};
+use std::slice;
+use std::str::FromStr;
+
+pub fn make_rules(tuples: &[(&str, &str, &str)]) -> Vec<Rewrite> {
+    tuples
+        .iter()
+        .map(|(name, left, right)| {
+            let left = Pattern::from_str(left).unwrap();
+            let right = Pattern::from_str(right).unwrap();
+            Rewrite::new(*name, left, right).unwrap()
+        })
+        .collect()
+}
 
 pub struct Context {
     iteration: usize,
@@ -106,41 +117,44 @@ pub unsafe extern "C" fn egraph_run_with_iter_limit(
     iterations_ptr: *mut *mut c_void,
     iter_limit: u32,
     node_limit: u32,
-    is_constant_folding_enabled: bool,
+    _is_constant_folding_enabled: bool,
 ) -> *const EGraphIter {
     // Safety: `ptr` was box allocated by `egraph_create`
     let mut context = Box::from_raw(ptr);
 
     if context.runner.stop_reason.is_none() {
         let length: usize = rules_array_length as usize;
-        let ffi_rules: &[*mut FFIRule] = slice::from_raw_parts(rules_array_ptr, length);
-        let mut ffi_tuples: Vec<(&str, &str, &str)> = vec![];
-        let mut ffi_strings: Vec<(String, String, String)> = vec![];
-        for ffi_rule in ffi_rules.iter() {
-            let str_tuple = ffirule_to_tuple(*ffi_rule);
-            ffi_strings.push(str_tuple);
+        if length > 0 {
+            let ffi_rules: &[*mut FFIRule] = slice::from_raw_parts(rules_array_ptr, length);
+            let mut ffi_tuples: Vec<(&str, &str, &str)> = vec![];
+            let mut ffi_strings: Vec<(String, String, String)> = vec![];
+            for ffi_rule in ffi_rules.iter() {
+                let str_tuple = ffirule_to_tuple(*ffi_rule);
+                ffi_strings.push(str_tuple);
+            }
+
+            for ffi_string in ffi_strings.iter() {
+                ffi_tuples.push((&ffi_string.0, &ffi_string.1, &ffi_string.2));
+            }
+
+            let rules: Vec<Rewrite> = make_rules(&ffi_tuples);
+            context.rules = rules;
+        } else {
+            context.rules = rules2();
         }
-
-        for ffi_string in ffi_strings.iter() {
-            ffi_tuples.push((&ffi_string.0, &ffi_string.1, &ffi_string.2));
-        }
-
-        let rules: Vec<Rewrite> = rules::mk_rules(&ffi_tuples);
-        context.rules = rules;
-
-        context.runner.egraph.analysis.constant_fold = is_constant_folding_enabled;
+//        context.runner.egraph.analysis.constant_fold = is_constant_folding_enabled;
         context.runner = context
             .runner
             .with_node_limit(node_limit as usize)
             .with_iter_limit(iter_limit as usize) // should never hit
             .with_time_limit(Duration::from_secs(u64::MAX))
-            .with_hook(|r| {
-                if r.egraph.analysis.unsound.load(Ordering::SeqCst) {
-                    Err("Unsoundness detected".into())
-                } else {
-                    Ok(())
-                }
-            })
+            // .with_hook(|r| {
+            //     if r.egraph.analysis.unsound.load(Ordering::SeqCst) {
+            //         Err("Unsoundness detected".into())
+            //     } else {
+            //         Ok(())
+            //     }
+            // })
             .run(&context.rules);
     }
 
@@ -206,7 +220,8 @@ fn find_extracted(runner: &Runner, id: u32, iter: u32) -> &Extracted {
     let id = runner.egraph.find(Id::from(id as usize));
 
     // go back one more iter, egg can duplicate the final iter in the case of an error
-    let is_unsound = runner.egraph.analysis.unsound.load(Ordering::SeqCst);
+    // let is_unsound = runner.egraph.analysis.unsound.load(Ordering::SeqCst);
+    let is_unsound = false;
     let sound_iter = min(
         runner
             .iterations
@@ -291,7 +306,7 @@ pub unsafe extern "C" fn egraph_get_variants(
     let head_node = &orig_recexpr.as_ref()[orig_recexpr.as_ref().len() - 1];
 
     // extractor
-    let extractor = Extractor::new(&context.runner.egraph, AltCost::new(&context.runner.egraph));
+    let extractor = Extractor::new(&context.runner.egraph, LinDiff2SynthCostFn);
     let mut cache: IndexMap<Id, RecExpr> = Default::default();
 
     // extract variants
@@ -322,14 +337,14 @@ pub unsafe extern "C" fn egraph_get_variants(
 #[no_mangle]
 pub unsafe extern "C" fn egraph_is_unsound_detected(ptr: *mut Context) -> bool {
     // Safety: `ptr` was box allocated by `egraph_create`
-    let context = ManuallyDrop::new(Box::from_raw(ptr));
-
-    context
-        .runner
-        .egraph
-        .analysis
-        .unsound
-        .load(Ordering::SeqCst)
+    let _context = ManuallyDrop::new(Box::from_raw(ptr));
+    false
+    // context
+    //     .runner
+    //     .egraph
+    //     .analysis
+    //     .unsound
+    //     .load(Ordering::SeqCst)
 }
 
 #[no_mangle]

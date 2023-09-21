@@ -1,8 +1,15 @@
 use egg::{rewrite as rw, *};
 
+pub type RecExpr = egg::RecExpr<LinDiff2Synth>;
+pub type Pattern = egg::Pattern<LinDiff2Synth>;
+pub type EGraph = egg::EGraph<LinDiff2Synth, ()>;
+pub type Rewrite = egg::Rewrite<LinDiff2Synth, ()>;
+pub type Runner = egg::Runner<LinDiff2Synth, (), IterData>;
+pub type Iteration = egg::Iteration<IterData>;
+
 define_language! {
     pub enum LinDiff2 {
-        "i" = Integrate(Id),
+        "%" = Integrate(Id),
         "$" = Summing([Id; 2]),
         "*" = Weight([Id; 2]),
         Constant(u32),
@@ -10,7 +17,33 @@ define_language! {
     }
 }
 
+pub struct IterData {
+    pub extracted: Vec<(Id, Extracted)>,
+}
+
+pub struct Extracted {
+    pub best: RecExpr,
+    pub cost: usize,
+}
+
+impl IterationData<LinDiff2Synth, ()> for IterData {
+    fn make(runner: &Runner) -> Self {
+        let extractor = Extractor::new(&runner.egraph, LinDiff2SynthCostFn);
+        let extracted = runner
+            .roots
+            .iter()
+            .map(|&root| {
+                let (cost, best) = extractor.find_best(root);
+                let ext = Extracted { cost, best };
+                (root, ext)
+            })
+            .collect();
+        Self { extracted }
+    }
+}
+
 pub struct LinDiff2CostFn;
+
 impl egg::CostFunction<LinDiff2> for LinDiff2CostFn {
     type Cost = usize;
     fn cost<C>(&mut self, enode: &LinDiff2, mut costs: C) -> Self::Cost
@@ -28,14 +61,15 @@ impl egg::CostFunction<LinDiff2> for LinDiff2CostFn {
 }
 
 define_language! {
-    pub enum LinDiff2X {
-        "+" = Add([Id; 2]),
-        "x" = Mult([Id; 2]),
-        "I" = Integrate(Id),
+    pub enum LinDiff2Synth {
+        "e+" = Add([Id; 2]),
+        "e*" = Mult([Id; 2]),
+        "e%" = Integrate(Id),
+        "e-" = Negative(Id),
         "$" = Summing([Id; 2]),
-        "i" = Integrating(Id),
+        "%" = Integrating(Id),
         "*" = Weight([Id; 2]),
-        "-" = Negative(Id),
+
         "c*" = ConstMult([Id; 2]),
         "c+" = ConstAdd([Id; 2]),
         "c-" = ConstSub([Id; 2]),
@@ -44,23 +78,23 @@ define_language! {
     }
 }
 
-pub struct LinDiff2XCostFn;
-impl egg::CostFunction<LinDiff2X> for LinDiff2XCostFn {
+pub struct LinDiff2SynthCostFn;
+impl egg::CostFunction<LinDiff2Synth> for LinDiff2SynthCostFn {
     type Cost = usize;
-    fn cost<C>(&mut self, enode: &LinDiff2X, mut costs: C) -> Self::Cost
+    fn cost<C>(&mut self, enode: &LinDiff2Synth, mut costs: C) -> Self::Cost
     where
         C: FnMut(Id) -> Self::Cost,
     {
         let op_cost = match enode {
-            LinDiff2X::Add(..) => 10000,
-            LinDiff2X::Integrate(..) => 10000,
-            LinDiff2X::Mult(..) => 10000,
-            LinDiff2X::Symbol(..) => 0,
-            LinDiff2X::ConstMult(..) => 0,
-            LinDiff2X::ConstAdd(..) => 0,
-            LinDiff2X::ConstSub(..) => 0,
-            LinDiff2X::Constant(..) => 0,
-            LinDiff2X::Weight(..) => 0,
+            LinDiff2Synth::Add(..) => 10000,
+            LinDiff2Synth::Integrate(..) => 10000,
+            LinDiff2Synth::Mult(..) => 10000,
+            LinDiff2Synth::Symbol(..) => 0,
+            LinDiff2Synth::ConstMult(..) => 0,
+            LinDiff2Synth::ConstAdd(..) => 0,
+            LinDiff2Synth::ConstSub(..) => 0,
+            LinDiff2Synth::Constant(..) => 0,
+            LinDiff2Synth::Weight(..) => 0,
             _ => 1,
         };
         enode.fold(op_cost, |sum, i| sum + costs(i))
@@ -69,9 +103,9 @@ impl egg::CostFunction<LinDiff2X> for LinDiff2XCostFn {
 
 pub fn rules2_integrate<L: Language + Send + Sync + FromOp + 'static, N: Analysis<L> + 'static>() -> Vec<egg::Rewrite<L, N>> {
     vec![
-        rw!("integrate-split"; "(i ($ ?a ?b))" => "($ (i ?a) (i ?b))"),
-        rw!("integrate-join"; "($ (i ?a) (i ?b))" => "(i ($ ?a ?b))"),
-        rw!("integrate-zero"; "(i 0)" => "0"),
+        rw!("integrate-split"; "(% ($ ?a ?b))" => "($ (% ?a) (% ?b))"),
+        rw!("integrate-join"; "($ (% ?a) (% ?b))" => "(% ($ ?a ?b))"),
+        rw!("integrate-zero"; "(% 0)" => "0"),
     ]
 }
 
@@ -106,8 +140,8 @@ pub fn rules2_shortcuts<L: Language + Send + Sync + FromOp + 'static, N: Analysi
 pub fn rules2_weights<L: Language + Send + Sync + FromOp + 'static, N: Analysis<L> + 'static>() -> Vec<egg::Rewrite<L, N>> {
     vec![
         // Weights
-        rw!("factor-integrate"; "(i (* ?a ?b))" => "(* ?a (i ?b))"),
-        rw!("distribute-integrate"; "(* ?a (i ?b))" => "(i (* ?a ?b))"),
+        rw!("factor-integrate"; "(% (* ?a ?b))" => "(* ?a (% ?b))"),
+        rw!("distribute-integrate"; "(* ?a (% ?b))" => "(% (* ?a ?b))"),
 
         rw!("factor-weight"; "($ (* ?m ?a) (* ?m ?b))" => "(* ?m ($ ?a ?b))"),
         rw!("distribute-weight"; "(* ?m ($ ?a ?b))" => "($ (* ?m ?a) (* ?m ?b))"),
@@ -146,13 +180,14 @@ pub fn rules2_weight_combine<L: Language + Send + Sync + FromOp + 'static, N: An
 
 pub fn rules2_elimination<L: Language + Send + Sync + FromOp + 'static, N: Analysis<L> + 'static>() -> Vec<egg::Rewrite<L, N>> {
     vec![
-        rw!("eliminate-add"; "(+ ?a ?b)" => "($ ($ ?a ?b) 0)"),
-        rw!("eliminate-integral"; "(I ?a)" => "($ (i ?a) 0)"),
-        rw!("sum-invert"; "(- ?a)" => "($ ?a 0)"),
+        rw!("eliminate-add"; "(e+ ?a ?b)" => "($ ($ ?a ?b) 0)"),
+        rw!("eliminate-mult"; "(e* ?a ?b)" => "(* ?a ?b)"),
+        rw!("eliminate-integral"; "(e% ?a)" => "($ (% ?a) 0)"),
+        rw!("sum-invert"; "(e- ?a)" => "($ ?a 0)"),
     ]
 }
 
-pub fn rules2() -> Vec<egg::Rewrite<LinDiff2X, ()>> {
+pub fn rules2() -> Vec<egg::Rewrite<LinDiff2Synth, ()>> {
     let mut rules = rules2_core();
     rules.extend(rules2_shortcuts());
     rules.extend(rules2_elimination());
@@ -167,15 +202,15 @@ egg::test_fn!{
 }
 
 egg::test_fn! {
-    unit_weights, rules2(), "(+ x y)" => "($ ($ (* 1 x) (* 1 y)) 0)"
+    unit_weights, rules2(), "(e+ x y)" => "($ ($ (* 1 x) (* 1 y)) 0)"
 }
 
 egg::test_fn! {
-    unit_weights_neg, rules2(), "(- (+ x y))" => "($ (* 1 x) (* 1 y))"
+    unit_weights_neg, rules2(), "(e- (e+ x y))" => "($ (* 1 x) (* 1 y))"
 }
 
 egg::test_fn! {
-    cancellation_1, rules2(), "($ (- a) a)" => "0"
+    cancellation_1, rules2(), "($ (e- a) a)" => "0"
 }
 
 egg::test_fn! {
@@ -183,20 +218,19 @@ egg::test_fn! {
 }
 
 egg::test_fn! {
-    cancellation_4, rules2(), "(+ (+ x z) (+ w (- x)))" => "($ ($ z w) 0)"
+    cancellation_4, rules2(), "(e+ (e+ x z) (e+ w (e- x)))" => "($ ($ z w) 0)"
 }
 
 egg::test_fn! {
-    cancellation_complicated, rules2(), "(+ c (- (+ (- b) (+ a b))))" => "(- ($ (- a) c))"
+    cancellation_complicated, rules2(), "(e+ c (e- (e+ (e- b) (e+ a b))))" => "(e- ($ (e- a) c))"
 }
 
 egg::test_fn! {
-    unbalanced, rules2(), "(+ a (+ b (+ c d)))" =>
+    unbalanced, rules2(), "(e+ a (e+ b (e+ c d)))" =>
         "($ ($ a b) ($ c d))"
 }
 
 egg::test_fn! {
-    balance, rules2(), "(+ a (+ b (+ c (+ d (+ e (+ f (+ g h)))))))" =>
+    balance, rules2(), "(e+ a (e+ b (e+ c (e+ d (e+ e (e+ f (e+ g h)))))))" =>
         "($ ($ ($ a b) ($ c d)) ($ ($ e f) ($ g h)))"
 }
- 

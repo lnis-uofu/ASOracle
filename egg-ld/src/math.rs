@@ -54,21 +54,6 @@ impl<'a> CostFunction<Math> for AltCost<'a> {
     }
 }
 
-impl IterationData<Math, ConstantFold> for IterData {
-    fn make(runner: &Runner) -> Self {
-        let extractor = Extractor::new(&runner.egraph, AltCost::new(&runner.egraph));
-        let extracted = runner
-            .roots
-            .iter()
-            .map(|&root| {
-                let (cost, best) = extractor.find_best(root);
-                let ext = Extracted { cost, best };
-                (root, ext)
-            })
-            .collect();
-        Self { extracted }
-    }
-}
 
 // operators from FPCore
 define_language! {
