@@ -1,16 +1,29 @@
 #lang racket
 (require "dsl.rkt" "ldegg.rkt")
 
-(provide synthesize expand-program)
+(provide synthesize synthesize-combined expand-program)
 
 (define (synthesize program)
   (match-let* ([assigns (ld-program-assigns program)]
                [outputs (ld-program-outputs program)]
-               [exprs (expand-outputs outputs assigns)]
+               [named-exprs (expand-outputs outputs assigns)]
+               [exprs (map (match-lambda [(list _ b) b]) named-exprs)]
+               [names (map (match-lambda [(list b _) b]) named-exprs)]
                [rules '()]
-               [query (make-egg-query (map (match-lambda [(list _ b) b]) exprs) rules)]
+               [query (make-egg-query exprs rules)]
                [(cons variants proof) (run-egg query #f)])
-    variants))
+    (map cons names (map last variants))))
+
+(define (synthesize-combined program)
+  (match-let* ([assigns (ld-program-assigns program)]
+               [outputs (ld-program-outputs program)]
+               [named-exprs (expand-outputs outputs assigns)]
+               [exprs (list (cons 'output (map (match-lambda [(list _ b) b]) named-exprs)))]
+               [names (map (match-lambda [(list b _) b]) named-exprs)]
+               [rules '()]
+               [query (make-egg-query exprs rules)]
+               [(cons variants proof) (run-egg query #f)])
+    (map cons names (cdr (last (last variants))))))
 
 (define (expand-program program)
   (expand-outputs (ld-program-outputs program) (ld-program-assigns program)))

@@ -62,6 +62,14 @@ impl egg::CostFunction<LinDiff2> for LinDiff2CostFn {
 
 define_language! {
     pub enum LinDiff2Synth {
+        "out8" = Output8([Id; 8]),
+        "out7" = Output7([Id; 7]),
+        "out6" = Output6([Id; 6]),
+        "out5" = Output5([Id; 5]),
+        "out4" = Output4([Id; 4]),
+        "out3" = Output3([Id; 3]),
+        "out2" = Output2([Id; 2]),
+        "out1" = Output1([Id; 1]),
         "e+" = Add([Id; 2]),
         "e*" = Mult([Id; 2]),
         "e&" = Integrate(Id),
@@ -90,13 +98,9 @@ impl egg::CostFunction<LinDiff2Synth> for LinDiff2SynthCostFn {
             LinDiff2Synth::Integrate(..) => 10000,
             LinDiff2Synth::Mult(..) => 10000,
             LinDiff2Synth::Negative(..) => 10000,
-            LinDiff2Synth::Symbol(..) => 0,
-            LinDiff2Synth::ConstMult(..) => 0,
-            LinDiff2Synth::ConstAdd(..) => 0,
-            LinDiff2Synth::ConstSub(..) => 0,
-            LinDiff2Synth::Constant(..) => 0,
-            LinDiff2Synth::Weight(..) => 0,
-            _ => 1,
+            LinDiff2Synth::Summing(..) => 1,
+            LinDiff2Synth::Integrating(..) => 1,
+            _ => 0,
         };
         enode.fold(op_cost, |sum, i| sum + costs(i))
     }

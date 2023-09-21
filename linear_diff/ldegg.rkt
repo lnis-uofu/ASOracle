@@ -26,7 +26,10 @@
     [(negative child) (format "(e- ~a)" (expr->egg-expr child _))]
     [(multiply left right) (format "(e* ~a ~a)" (expr->egg-expr left _) (expr->egg-expr right _))]
     [(const scalar) (~a scalar)]
-    [(reference name) (~a name)]))
+    [(reference name) (~a name)]
+    [(cons 'output output) (format "(out~a ~a)"
+                              (length output)
+                              (string-join (map (lambda (expr) (expr->egg-expr expr _)) output)))]))
 
 (define (egg-s-expr->expr expr)
   (match expr
@@ -40,7 +43,8 @@
  (egg-s-expr->expr (read (open-input-string str))))
 
 (define (egg-exprs->exprs str egraph-data)
-  (egg-s-expr->expr (read (open-input-string str))))
+  str)
+;  (egg-s-expr->expr (read (open-input-string str))))
 
 ;;;;;;;; Runtime
 
@@ -69,10 +73,6 @@
                                       node-ids
                                       (egraph-query-const-folding? input)
                                       #:limit (egraph-query-iter-limit input)))
-
-
-  (println "***** iter-data *****")
-  ;(print iter-data)
   (define variants
     (if variants?
         (for/list ([id node-ids] [expr (egraph-query-exprs input)])
@@ -80,8 +80,6 @@
         (for/list ([id node-ids])
           (for/list ([iter (in-range (length iter-data))])
             (egraph-get-simplest egg-graph id iter)))))
-  ;(println "***** Variants *****")
-  ;(print variants)
   (match proof-input
     [(cons start end)
      #:when (not (and (egraph-is-unsound-detected egg-graph) proof-ignore-when-unsound?))
@@ -89,8 +87,6 @@
        (error "Cannot get proof: start and end are not equal.\n start: ~a \n end: ~a" start end))
 
      (define proof (egraph-get-proof egg-graph start end))
-       (print "***** Variants *****")
-     ;(write proof)
      (when (null? proof)
        (error (format "Failed to produce proof for ~a to ~a" start end)))
      (cons variants proof)]
