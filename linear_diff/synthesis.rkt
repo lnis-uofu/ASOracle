@@ -1,7 +1,7 @@
 #lang racket
-(require "dsl.rkt" "ldegg.rkt")
+(require "dsl.rkt" "ldegg.rkt" graph)
 
-(provide synthesize synthesize-combined expand-program)
+(provide synthesize synthesize-combined expand-program flatten-results)
 
 (define (synthesize program)
   (match-let* ([assigns (ld-program-assigns program)]
@@ -65,6 +65,35 @@
      (list symbol (list (list symbol (const scalar))))]
     [(reference name)
      (list name '())]))
+
+(define (flatten-results exprs)
+  (begin
+    (define graph (directed-graph '()))
+    (map (curry flatten-graph graph) exprs)
+    graph))
+
+(define (flatten-graph graph expr)
+  (begin
+    (add-vertex! graph expr)
+    (match expr
+      ;; [(integrating child)
+      [(list '& child)
+       (begin (flatten-graph graph child)
+              (add-edge! graph expr child))]
+      ;; [(summing left right)
+      [(list '$ left right)
+       (begin (flatten-graph graph left)
+              (flatten-graph graph right)
+              (add-edge! graph expr left)
+              (add-edge! graph expr right))]
+      ;; [(weight value child)
+      [(list '* value child)
+       (begin (flatten-graph graph child)
+              (add-edge! graph expr child))]
+      [(cons output rest)
+       (begin (flatten-graph graph rest)
+              (add-edge! graph expr rest))]
+      [_ #'void])))
 
 (module+ test
   (require rackunit rackunit/text-ui )

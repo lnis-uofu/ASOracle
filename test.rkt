@@ -4,7 +4,8 @@
          linear_diff/lexer
          linear_diff/expander
          linear_diff/synthesis
-         linear_diff/ldegg)
+         linear_diff/ldegg
+         graph)
 
 (provide parsed synthesized exprs eggs)
 
@@ -18,3 +19,8 @@
 (for-each pretty-display synthesized)
 (println "***** top *****")
 (for-each pretty-display synthesized-top)
+(println "***** graph *****")
+
+(println (graphviz (flatten-results synthesized-top)
+                   #:output (open-output-file	"test.dot")))
+;                   #:vertex-attributes (map (match-lambda [(cons name)
