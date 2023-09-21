@@ -17,5 +17,5 @@ a = 2
 v = x + 2
 b = y + a
 c = 1 + 2 * 5
-z = integrate(-4.5 * x + 2)
+z = integrate(-4 * x + 2)
 w = 5 * b + - z + c

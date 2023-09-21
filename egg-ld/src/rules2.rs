@@ -9,10 +9,10 @@ pub type Iteration = egg::Iteration<IterData>;
 
 define_language! {
     pub enum LinDiff2 {
-        "%" = Integrate(Id),
+        "&" = Integrate(Id),
         "$" = Summing([Id; 2]),
         "*" = Weight([Id; 2]),
-        Constant(u32),
+        Constant(i32),
         Symbol(Symbol),
     }
 }
@@ -64,10 +64,10 @@ define_language! {
     pub enum LinDiff2Synth {
         "e+" = Add([Id; 2]),
         "e*" = Mult([Id; 2]),
-        "e%" = Integrate(Id),
+        "e&" = Integrate(Id),
         "e-" = Negative(Id),
         "$" = Summing([Id; 2]),
-        "%" = Integrating(Id),
+        "&" = Integrating(Id),
         "*" = Weight([Id; 2]),
 
         "c*" = ConstMult([Id; 2]),
@@ -89,6 +89,7 @@ impl egg::CostFunction<LinDiff2Synth> for LinDiff2SynthCostFn {
             LinDiff2Synth::Add(..) => 10000,
             LinDiff2Synth::Integrate(..) => 10000,
             LinDiff2Synth::Mult(..) => 10000,
+            LinDiff2Synth::Negative(..) => 10000,
             LinDiff2Synth::Symbol(..) => 0,
             LinDiff2Synth::ConstMult(..) => 0,
             LinDiff2Synth::ConstAdd(..) => 0,
@@ -103,9 +104,10 @@ impl egg::CostFunction<LinDiff2Synth> for LinDiff2SynthCostFn {
 
 pub fn rules2_integrate<L: Language + Send + Sync + FromOp + 'static, N: Analysis<L> + 'static>() -> Vec<egg::Rewrite<L, N>> {
     vec![
-        rw!("integrate-split"; "(% ($ ?a ?b))" => "($ (% ?a) (% ?b))"),
-        rw!("integrate-join"; "($ (% ?a) (% ?b))" => "(% ($ ?a ?b))"),
-        rw!("integrate-zero"; "(% 0)" => "0"),
+        rw!("integrate-split"; "(& ($ ?a ?b))" => "($ (& ?a) (& ?b))"),
+        rw!("integrate-join"; "($ (& ?a) (& ?b))" => "(& ($ ?a ?b))"),
+        rw!("integrate-zero"; "(& 0)" => "0"),
+        rw!("integrate-factor-neg"; "($ (& ($ ?a 0)) 0)" => "(& ?a)"),
     ]
 }
 
@@ -140,8 +142,8 @@ pub fn rules2_shortcuts<L: Language + Send + Sync + FromOp + 'static, N: Analysi
 pub fn rules2_weights<L: Language + Send + Sync + FromOp + 'static, N: Analysis<L> + 'static>() -> Vec<egg::Rewrite<L, N>> {
     vec![
         // Weights
-        rw!("factor-integrate"; "(% (* ?a ?b))" => "(* ?a (% ?b))"),
-        rw!("distribute-integrate"; "(* ?a (% ?b))" => "(% (* ?a ?b))"),
+        rw!("factor-integrate"; "(& (* ?a ?b))" => "(* ?a (& ?b))"),
+        rw!("distribute-integrate"; "(* ?a (& ?b))" => "(& (* ?a ?b))"),
 
         rw!("factor-weight"; "($ (* ?m ?a) (* ?m ?b))" => "(* ?m ($ ?a ?b))"),
         rw!("distribute-weight"; "(* ?m ($ ?a ?b))" => "($ (* ?m ?a) (* ?m ?b))"),
@@ -182,7 +184,7 @@ pub fn rules2_elimination<L: Language + Send + Sync + FromOp + 'static, N: Analy
     vec![
         rw!("eliminate-add"; "(e+ ?a ?b)" => "($ ($ ?a ?b) 0)"),
         rw!("eliminate-mult"; "(e* ?a ?b)" => "(* ?a ?b)"),
-        rw!("eliminate-integral"; "(e% ?a)" => "($ (% ?a) 0)"),
+        rw!("eliminate-integral"; "(e& ?a)" => "($ (& ?a) 0)"),
         rw!("sum-invert"; "(e- ?a)" => "($ ?a 0)"),
     ]
 }
@@ -192,8 +194,8 @@ pub fn rules2() -> Vec<egg::Rewrite<LinDiff2Synth, ()>> {
     rules.extend(rules2_shortcuts());
     rules.extend(rules2_elimination());
     rules.extend(rules2_integrate());
-    rules.extend(rules2_weights());
-    rules.extend(rules2_weight_combine());
+    // rules.extend(rules2_weights());
+    // rules.extend(rules2_weight_combine());
     rules
 }
 

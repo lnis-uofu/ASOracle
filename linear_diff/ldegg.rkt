@@ -21,7 +21,7 @@
 ;;;;;;;;; Serialization
 (define (expr->egg-expr expr _)
   (match expr
-    [(integrate child) (format "(e% ~a)" (expr->egg-expr child _))]
+    [(integrate child) (format "(e& ~a)" (expr->egg-expr child _))]
     [(add left right) (format "(e+ ~a ~a)" (expr->egg-expr left _) (expr->egg-expr right _))]
     [(negative child) (format "(e- ~a)" (expr->egg-expr child _))]
     [(multiply left right) (format "(e* ~a ~a)" (expr->egg-expr left _) (expr->egg-expr right _))]
@@ -30,7 +30,7 @@
 
 (define (egg-s-expr->expr expr)
   (match expr
-    [(list "%" child) (integrating (egg-s-expr->expr child))]
+    [(list "&" child) (integrating (egg-s-expr->expr child))]
     [(list "$" left right) (summing (egg-s-expr->expr left)
                                     (egg-s-expr->expr right))]
     [(list "*" const child) (weight const (egg-s-expr->expr child))]

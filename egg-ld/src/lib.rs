@@ -81,8 +81,8 @@ pub unsafe extern "C" fn egraph_add_expr(ptr: *mut Context, expr: *const c_char)
     let mut context = Box::from_raw(ptr);
 
     assert_eq!(context.iteration, 0);
-
-    let rec_expr = CStr::from_ptr(expr).to_str().unwrap().parse().unwrap();
+    let rec_str = CStr::from_ptr(expr).to_str().unwrap();
+    let rec_expr = rec_str.parse().unwrap();
     context.runner = context.runner.with_expr(&rec_expr);
     let id = usize::from(*context.runner.roots.last().unwrap())
         .try_into()
