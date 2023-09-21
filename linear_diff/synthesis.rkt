@@ -69,30 +69,35 @@
 (define (flatten-results exprs)
   (begin
     (define graph (directed-graph '()))
-    (map (curry flatten-graph graph) exprs)
-    graph))
+    (define-vertex-property graph name #:init 'none)
+    (map (curry flatten-graph graph name-set!) exprs)
+    (list graph name)))
 
-(define (flatten-graph graph expr)
+(define (flatten-graph graph name-set! expr)
   (begin
     (add-vertex! graph expr)
+    (when (list? expr) (name-set! expr (symbol->string (first expr))))
+    (when (symbol? expr) (name-set! expr (symbol->string expr)))
+    (when (number? expr) (name-set! expr (~a expr)))
+    (define flatten-inner (curry flatten-graph graph name-set!))
     (match expr
       ;; [(integrating child)
       [(list '& child)
-       (begin (flatten-graph graph child)
-              (add-edge! graph expr child))]
+       (begin (flatten-inner child)
+              (add-directed-edge! graph expr child))]
       ;; [(summing left right)
       [(list '$ left right)
-       (begin (flatten-graph graph left)
-              (flatten-graph graph right)
-              (add-edge! graph expr left)
-              (add-edge! graph expr right))]
+       (begin (flatten-inner left)
+              (flatten-inner right)
+              (add-directed-edge! graph expr left)
+              (add-directed-edge! graph expr right))]
       ;; [(weight value child)
       [(list '* value child)
-       (begin (flatten-graph graph child)
-              (add-edge! graph expr child))]
+       (begin (flatten-inner child)
+              (add-directed-edge! graph expr child))]
       [(cons output rest)
-       (begin (flatten-graph graph rest)
-              (add-edge! graph expr rest))]
+       (begin (flatten-inner rest)
+              (add-directed-edge! graph expr rest))]
       [_ #'void])))
 
 (module+ test

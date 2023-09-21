@@ -20,7 +20,9 @@
 (println "***** top *****")
 (for-each pretty-display synthesized-top)
 (println "***** graph *****")
+(match-define (list graph names) (flatten-results synthesized-top))
+(println (graphviz graph
+                   #:output (open-output-file "test.dot" #:exists 'replace)
 
-(println (graphviz (flatten-results synthesized-top)
-                   #:output (open-output-file	"test.dot")))
-;                   #:vertex-attributes (map (match-lambda [(cons name)
+                   #:vertex-attributes (list (list 'label names))
+                   ))
