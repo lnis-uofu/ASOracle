@@ -27,9 +27,8 @@
     [(multiply left right) (format "(e* ~a ~a)" (expr->egg-expr left _) (expr->egg-expr right _))]
     [(const scalar) (~a scalar)]
     [(reference name) (~a name)]
-    [(cons 'output output) (format "(out~a ~a)"
-                              (length output)
-                              (string-join (map (lambda (expr) (expr->egg-expr expr _)) output)))]))
+    [(cons 'output output) (format "(out ~a)"
+                                   (string-join (map (lambda (expr) (expr->egg-expr expr _)) output)))]))
 
 (define (egg-s-expr->expr expr)
   (match expr

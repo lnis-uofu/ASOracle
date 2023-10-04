@@ -62,14 +62,7 @@ impl egg::CostFunction<LinDiff2> for LinDiff2CostFn {
 
 define_language! {
     pub enum LinDiff2Synth {
-        "out8" = Output8([Id; 8]),
-        "out7" = Output7([Id; 7]),
-        "out6" = Output6([Id; 6]),
-        "out5" = Output5([Id; 5]),
-        "out4" = Output4([Id; 4]),
-        "out3" = Output3([Id; 3]),
-        "out2" = Output2([Id; 2]),
-        "out1" = Output1([Id; 1]),
+        "out" = List(Box<[Id]>),
         "e+" = Add([Id; 2]),
         "e*" = Mult([Id; 2]),
         "e&" = Integrate(Id),
